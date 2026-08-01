@@ -1,0 +1,574 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Controller Trainer v8.2</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-mark">CT</div>
+      <div>
+        <h1>Controller Trainer <span>v8.2</span></h1>
+        <p>APM · Accuracy · Coordination</p>
+      </div>
+    </div>
+    <div class="top-actions">
+      <div id="controllerStatus" class="status offline">No controller detected</div>
+      <button id="fullscreenBtn" class="ghost">Fullscreen</button>
+    </div>
+  </header>
+
+  <div class="workspace">
+    <aside class="sidebar panel">
+      <div class="mode-group">
+        <div class="section-title">Buttons</div>
+        <button class="nav active" data-mode="sequence">
+          <span>Sequence</span><small>Accurate button chains</small>
+        </button>
+        <button class="nav" data-mode="simultaneous">
+          <span>Simultaneous Buttons</span><small>Press two controls together</small>
+        </button>
+      </div>
+
+      <div class="mode-group">
+        <div class="section-title">Sticks</div>
+        <button class="nav" data-mode="sticks">
+          <span>Single Stick</span><small>One-stick angle and distance</small>
+        </button>
+        <button class="nav" data-mode="dualsticks">
+          <span>Simultaneous Sticks</span><small>Move both sticks to targets</small>
+        </button>
+      </div>
+
+      <div class="mode-group">
+        <div class="section-title">Combat</div>
+        <button class="nav" data-mode="strafeaim">
+          <span>Strafe + Aim</span><small>Movement and aim together</small>
+        </button>
+        <button class="nav" data-mode="dualtrack">
+          <span>Dual Tracking</span><small>Track two smooth targets</small>
+        </button>
+        <button class="nav" data-mode="reactivetrack">
+          <span>Reactive Tracking</span><small>Read and react to changes</small>
+        </button>
+        <button class="nav" data-mode="gamescenario">
+          <span>Combat Movement</span><small>Strafe rhythm with active aim control</small>
+        </button>
+      </div>
+
+      <div class="session-actions">
+        <button id="startBtn" class="primary">Start</button>
+        <div class="row">
+          <button id="pauseBtn" class="ghost">Pause</button>
+          <button id="stopBtn" class="danger">Stop</button>
+        </div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <section id="trainerPanel" class="panel trainer">
+        <div class="trainer-head">
+          <div>
+            <span class="eyebrow">Current drill</span>
+            <strong id="hint">Press START on your controller</strong>
+          </div>
+          <div id="layoutBadge" class="badge">Xbox</div>
+        </div>
+
+        <div class="controller-and-stick">
+          <div id="controllerStage" class="controller-stage">
+            <svg id="xboxSvg" viewBox="0 0 1000 590" class="controller-svg" aria-label="Xbox controller">
+              <defs>
+                <linearGradient id="bodyGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stop-color="#28394a"/>
+                  <stop offset="100%" stop-color="#0b141d"/>
+                </linearGradient>
+                <radialGradient id="stickGrad" cx="50%" cy="38%">
+                  <stop offset="0%" stop-color="#1f2b35"/>
+                  <stop offset="100%" stop-color="#05090d"/>
+                </radialGradient>
+                <filter id="shadow"><feDropShadow dx="0" dy="18" stdDeviation="18" flood-opacity=".4"/></filter>
+              </defs>
+
+              <path class="body" filter="url(#shadow)"
+                d="M170 98
+                   C108 115 82 178 72 270
+                   L50 420
+                   C42 492 108 535 176 479
+                   L286 388
+                   C326 355 370 339 420 339
+                   H580
+                   C630 339 674 355 714 388
+                   L824 479
+                   C892 535 958 492 950 420
+                   L928 270
+                   C918 178 892 115 830 98
+                   C764 80 700 99 636 147
+                   C600 174 560 187 515 187
+                   H485
+                   C440 187 400 174 364 147
+                   C300 99 236 80 170 98 Z"/>
+
+              <rect id="x-lt" class="control" x="165" y="48" width="170" height="48" rx="18"/>
+              <rect id="x-rt" class="control" x="665" y="48" width="170" height="48" rx="18"/>
+              <rect id="x-lb" class="control" x="166" y="99" width="168" height="34" rx="14"/>
+              <rect id="x-rb" class="control" x="666" y="99" width="168" height="34" rx="14"/>
+
+              <circle id="x-ls" class="stick-ring" cx="250" cy="235" r="66"/>
+              <circle class="stick-cap" cx="250" cy="235" r="44"/>
+              <line id="x-ls-dir" class="stick-dir" x1="250" y1="235" x2="250" y2="175"/>
+
+              <!-- Five-piece D-pad, visually one cross -->
+              <rect id="x-dc" class="dpad-piece dpad-center" x="305" y="360" width="58" height="58" rx="8"/>
+              <rect id="x-du" class="dpad-piece" x="305" y="310" width="58" height="62" rx="9"/>
+              <rect id="x-dd" class="dpad-piece" x="305" y="406" width="58" height="62" rx="9"/>
+              <rect id="x-dl" class="dpad-piece" x="255" y="360" width="62" height="58" rx="9"/>
+              <rect id="x-dr" class="dpad-piece" x="351" y="360" width="62" height="58" rx="9"/>
+
+              <circle id="x-rs" class="stick-ring" cx="605" cy="360" r="66"/>
+              <circle class="stick-cap" cx="605" cy="360" r="44"/>
+              <line id="x-rs-dir" class="stick-dir" x1="605" y1="360" x2="605" y2="300"/>
+
+              <circle id="x-y" class="control face y" cx="765" cy="215" r="37"/>
+              <circle id="x-b" class="control face b" cx="832" cy="282" r="37"/>
+              <circle id="x-a" class="control face a" cx="765" cy="349" r="37"/>
+              <circle id="x-x" class="control face x" cx="698" cy="282" r="37"/>
+              <text x="765" y="226">Y</text><text x="832" y="293">B</text>
+              <text x="765" y="360">A</text><text x="698" y="293">X</text>
+              <text x="250" y="80">LT</text><text x="750" y="80">RT</text>
+              <text x="250" y="124">LB</text><text x="750" y="124">RB</text>
+              <rect id="x-view" class="control center-btn" x="430" y="220" width="48" height="35" rx="10"/>
+              <rect id="x-start" class="control center-btn" x="522" y="220" width="48" height="35" rx="10"/>
+            </svg>
+            <svg id="psSvg" viewBox="0 0 1000 590" class="controller-svg hidden" aria-label="PlayStation controller">
+              <defs>
+                <linearGradient id="psBodyGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stop-color="#28394a"/>
+                  <stop offset="100%" stop-color="#0b141d"/>
+                </linearGradient>
+                <radialGradient id="psStickGrad" cx="50%" cy="38%">
+                  <stop offset="0%" stop-color="#1f2b35"/>
+                  <stop offset="100%" stop-color="#05090d"/>
+                </radialGradient>
+              </defs>
+
+              <path class="body ps-body"
+                d="M170 98
+                   C108 115 82 178 72 270
+                   L50 420
+                   C42 492 108 535 176 479
+                   L286 388
+                   C326 355 370 339 420 339
+                   H580
+                   C630 339 674 355 714 388
+                   L824 479
+                   C892 535 958 492 950 420
+                   L928 270
+                   C918 178 892 115 830 98
+                   C764 80 700 99 636 147
+                   C600 174 560 187 515 187
+                   H485
+                   C440 187 400 174 364 147
+                   C300 99 236 80 170 98 Z"/>
+
+              <rect id="p-lt" class="control" x="165" y="48" width="170" height="48" rx="18"/>
+              <rect id="p-rt" class="control" x="665" y="48" width="170" height="48" rx="18"/>
+              <rect id="p-lb" class="control" x="166" y="99" width="168" height="34" rx="14"/>
+              <rect id="p-rb" class="control" x="666" y="99" width="168" height="34" rx="14"/>
+
+              <rect id="p-dc" class="dpad-piece dpad-center" x="205" y="255" width="58" height="58" rx="8"/>
+              <rect id="p-du" class="dpad-piece" x="205" y="205" width="58" height="62" rx="9"/>
+              <rect id="p-dd" class="dpad-piece" x="205" y="301" width="58" height="62" rx="9"/>
+              <rect id="p-dl" class="dpad-piece" x="155" y="255" width="62" height="58" rx="9"/>
+              <rect id="p-dr" class="dpad-piece" x="251" y="255" width="62" height="58" rx="9"/>
+
+              <circle id="p-ls" class="stick-ring" cx="395" cy="395" r="66"/>
+              <circle class="stick-cap" cx="395" cy="395" r="44"/>
+              <line id="p-ls-dir" class="stick-dir" x1="395" y1="395" x2="395" y2="335"/>
+
+              <circle id="p-rs" class="stick-ring" cx="605" cy="395" r="66"/>
+              <circle class="stick-cap" cx="605" cy="395" r="44"/>
+              <line id="p-rs-dir" class="stick-dir" x1="605" y1="395" x2="605" y2="335"/>
+
+              <circle id="p-triangle" class="control face y" cx="765" cy="215" r="37"/>
+              <circle id="p-circle" class="control face b" cx="832" cy="282" r="37"/>
+              <circle id="p-cross" class="control face a" cx="765" cy="349" r="37"/>
+              <circle id="p-square" class="control face x" cx="698" cy="282" r="37"/>
+              <text x="765" y="226">△</text><text x="832" y="293">○</text>
+              <text x="765" y="360">×</text><text x="698" y="293">□</text>
+              <text x="250" y="80">L2</text><text x="750" y="80">R2</text>
+              <text x="250" y="124">L1</text><text x="750" y="124">R1</text>
+
+              <rect class="touchpad" x="390" y="175" width="220" height="112" rx="20"/>
+              <rect id="p-view" class="control center-btn" x="342" y="215" width="40" height="35" rx="10"/>
+              <rect id="p-start" class="control center-btn" x="618" y="215" width="40" height="35" rx="10"/>
+            </svg>
+          </div>
+
+          <div id="stickTargets" class="stick-targets shared-stick-workspace hidden">
+            <div id="stickModeBanner" class="stick-mode-banner hidden">STICK TRAINING</div>
+
+            <div id="dualFocusLabel" class="dual-focus-label hidden">
+              <span class="left-key">LEFT STICK</span>
+              <span class="divider">+</span>
+              <span class="right-key">RIGHT STICK</span>
+            </div>
+
+            <div id="trackingScorePanel" class="tracking-score-panel hidden">
+              <span>On-target time</span>
+              <strong id="trackingScore">0%</strong>
+              <small id="trackingStatus">Acquire both targets</small>
+            </div>
+
+            <div class="shared-arena-shell">
+              <div id="sharedArena" class="shared-arena">
+                <div class="arena-ring ring-1"></div>
+                <div class="arena-ring ring-2"></div>
+                <div class="arena-ring ring-3"></div>
+                <div class="arena-ring ring-4"></div>
+                <div class="arena-axis horizontal"></div>
+                <div class="arena-axis vertical"></div>
+
+                <div id="leftTrail" class="stick-trail left-trail"></div>
+                <div id="rightTrail" class="stick-trail right-trail"></div>
+
+                <div id="leftTargetZone" class="target-zone left-zone"></div>
+                <div id="rightTargetZone" class="target-zone right-zone"></div>
+                <div id="leftTargetDot" class="arena-target-dot left-target-dot"></div>
+                <div id="rightTargetDot" class="arena-target-dot right-target-dot"></div>
+                <div id="leftLiveDot" class="arena-live-dot left-live-dot"></div>
+                <div id="rightLiveDot" class="arena-live-dot right-live-dot"></div>
+              </div>
+
+              <div class="arena-side-label arena-left-label">
+                <span>LEFT STICK</span>
+                <strong id="leftTargetText">CENTER</strong>
+                <small id="leftTargetStats">Movement</small>
+              </div>
+
+              <div class="arena-side-label arena-right-label">
+                <span>RIGHT STICK</span>
+                <strong id="rightTargetText">CENTER</strong>
+                <small id="rightTargetStats">Aim</small>
+              </div>
+            </div>
+          </div>
+
+        <div id="prompt" class="prompt">READY</div>
+        <div id="sequenceStrip" class="sequence-strip"></div>
+
+        <div id="timerLabelRow" class="timer-label"><span>Pressure</span><span id="pressureLabel">Standard</span></div>
+        <div id="timerBar" class="timer"><div id="timerFill"></div></div>
+        <div id="trackingRoundProgress" class="tracking-round-progress hidden compatibility-ui">
+          <div>
+            <span>Round progress</span>
+            <strong id="trackingTimeRemaining">—</strong>
+          </div>
+          <div class="round-progress-bar"><div id="trackingRoundFill"></div></div>
+        </div>
+      </section>
+
+      <section class="metrics">
+        <article class="panel metric"><span>Live APM</span><strong id="liveApm">0</strong></article>
+        <article class="panel metric"><span>Peak APM</span><strong id="peakApm">0</strong></article>
+        <article class="panel metric"><span>Accuracy</span><strong id="accuracy">100%</strong></article>
+        <article class="panel metric"><span>Current Combo</span><strong id="currentCombo">0</strong></article>
+        <article class="panel metric"><span>Longest Combo</span><strong id="longestCombo">0</strong></article>
+        <article class="panel metric"><span>Avg Transition</span><strong id="avgTransition">—</strong></article>
+      </section>
+
+      <section class="two-col">
+        <article class="panel card-pad">
+          <div class="card-title">Session Performance</div>
+          <div class="stat-grid">
+            <div><span>Inputs</span><strong id="sessionInputs">0</strong></div>
+            <div><span>Sequences</span><strong id="sessionSequences">0</strong></div>
+            <div><span>Duration</span><strong id="sessionDuration">00:00</strong></div>
+            <div><span>Best sequence</span><strong id="bestSequence">—</strong></div>
+            <div><span>Hesitations</span><strong id="hesitations">0</strong></div>
+            <div><span>Recovery</span><strong id="recoveryTime">—</strong></div>
+          </div>
+        </article>
+
+        <article class="panel card-pad compatibility-ui">
+          <div class="card-title">Challenge Progress</div>
+          <div id="challengeList" class="challenge-list"></div>
+        </article>
+      </section>
+
+      <section class="panel card-pad compatibility-ui">
+        <div class="coach-head">
+          <div>
+            <span class="eyebrow">Adaptive coach</span>
+            <h2>Session Insight</h2>
+          </div>
+          <button id="resetStatsBtn" class="ghost small">Reset stats</button>
+        </div>
+        <div id="coachText" class="coach-text">Complete a session to generate coaching feedback.</div>
+      </section>
+    </main>
+
+    <aside class="right panel settings">
+      <div class="settings-header">
+        <div>
+          <div class="section-title">Settings</div>
+          <small id="settingsModeHint">Sequence settings</small>
+        </div>
+      </div>
+
+      <div class="settings-group primary-settings">
+        <label>Controller
+          <select id="layoutSelect">
+            <option value="xbox" selected>Xbox</option>
+            <option value="playstation">PlayStation / PS4</option>
+          </select>
+        </label>
+
+        <label>Difficulty
+          <input id="trainingDifficulty" type="range" min="1" max="5" step="1" value="3">
+          <small><span id="trainingDifficultyValue">3</span>/5 · <span id="trainingDifficultyName">Standard</span></small>
+        </label>
+
+        <label>Session
+          <div class="number-setting">
+            <input id="sessionDurationMinutes" type="number" min="1" max="180" step="1" value="10">
+            <span>minutes</span>
+          </div>
+        </label>
+
+        <label class="toggle mode-setting" data-modes="dualsticks,strafeaim,dualtrack,reactivetrack,gamescenario">
+          Infinite session <input id="infiniteStickSession" type="checkbox">
+        </label>
+      </div>
+
+      <details class="settings-details mode-setting" data-modes="sequence,simultaneous" open>
+        <summary>Button drill</summary>
+        <div class="details-content">
+          <label>Sequence length
+            <select id="sequenceLength">
+              <option value="3">3</option>
+              <option value="4" selected>4</option>
+              <option value="5">5</option>
+              <option value="6">6</option>
+              <option value="8">8</option>
+              <option value="10">10</option>
+            </select>
+          </label>
+
+          <label>Prompt time
+            <input id="timeSlider" type="range" min="900" max="5000" step="50" value="2200">
+            <small id="timeLabel">Hard</small>
+          </label>
+
+          <label class="toggle">Audio feedback <input id="soundToggle" type="checkbox" checked></label>
+          <label class="toggle">Show completed inputs <input id="completedToggle" type="checkbox" checked></label>
+        </div>
+      </details>
+
+      <details class="settings-details mode-setting" data-modes="sticks,dualsticks,strafeaim,dualtrack,reactivetrack,gamescenario" open>
+        <summary>Stick feel</summary>
+        <div class="details-content">
+          <label>Deadzone
+            <input id="stickDeadzone" type="range" min="0" max="15" step="0.5" value="3">
+            <small><span id="stickDeadzoneValue">3</span>%</small>
+          </label>
+
+          <label>Response curve
+            <select id="stickResponseCurve">
+              <option value="linear" selected>Linear</option>
+              <option value="classic">Classic-style</option>
+            </select>
+          </label>
+
+          <div class="mode-setting" data-modes="sticks,dualsticks">
+            <label>Directions
+              <select id="angleSteps">
+                <option value="8">8 directions</option>
+                <option value="16" selected>16 directions</option>
+                <option value="32">32 directions</option>
+              </select>
+            </label>
+
+            <label>Target distance
+              <select id="distanceMode">
+                <option value="fine">Inner</option>
+                <option value="mixed" selected>Mixed</option>
+                <option value="outer">Outer</option>
+              </select>
+            </label>
+
+            <label>Hold time
+              <input id="holdDuration" type="range" min="0" max="600" step="50" value="100">
+              <small><span id="holdDurationValue">100</span> ms</small>
+            </label>
+          </div>
+        </div>
+      </details>
+
+      <details class="settings-details mode-setting moving-target-settings" data-modes="strafeaim,dualtrack,reactivetrack,gamescenario" open>
+        <summary>Moving Target Settings</summary>
+        <div class="details-content">
+          <div id="movingModeDescription" class="mode-description">Controls for continuous tracking drills.</div>
+          <label>Target speed
+            <select id="trackingSpeed">
+              <option value="0.45">Slow</option>
+              <option value="0.75" selected>Standard</option>
+              <option value="1.10">Fast</option>
+              <option value="1.45">Extreme</option>
+            </select>
+          </label>
+
+          <label>Target size
+            <select id="trackingTargetSize">
+              <option value="0.20">Large</option>
+              <option value="0.14" selected>Standard</option>
+              <option value="0.09">Small</option>
+            </select>
+          </label>
+
+          <div class="mode-setting" data-modes="strafeaim">
+            <label>Strafe distance
+              <select id="strafeIntensity">
+                <option value="0.45" selected>Small</option>
+                <option value="0.70">Medium</option>
+                <option value="0.90">Wide</option>
+              </select>
+            </label>
+            <label>Aim range
+              <select id="aimTargetStyle">
+                <option value="fine">Fine</option>
+                <option value="mixed" selected>Mixed</option>
+                <option value="outer">Wide</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="mode-setting" data-modes="dualtrack">
+            <label>Movement pattern
+              <select id="trackingPattern">
+                <option value="circle">Circles</option>
+                <option value="figure8">Figure 8</option>
+                <option value="wander" selected>Wander</option>
+                <option value="opposite">Opposite</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="mode-setting" data-modes="reactivetrack">
+            <label>Reaction speed
+              <select id="reactiveIntensity">
+                <option value="easy">Controlled</option>
+                <option value="standard" selected>Standard</option>
+                <option value="hard">Fast</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="mode-setting" data-modes="gamescenario">
+            <label>Scenario
+              <select id="gameScenarioType">
+                <option value="mixed" selected>Mixed combat</option>
+                <option value="smg">SMG tracking</option>
+                <option value="shotgun">Shotgun peeks</option>
+                <option value="micro">Micro strafes</option>
+                <option value="reset">Reset and re-center</option>
+              </select>
+            </label>
+
+            <label>Movement amount
+              <select id="leftMovementAmount">
+                <option value="0.32" selected>Small</option>
+                <option value="0.48">Medium</option>
+                <option value="0.65">Wide</option>
+              </select>
+            </label>
+
+            <label>Movement forgiveness
+              <select id="leftStickLeniency">
+                <option value="0.30">High</option>
+                <option value="0.22" selected>Standard</option>
+                <option value="0.15">Low</option>
+              </select>
+            </label>
+          </div>
+        </div>
+      </details>
+
+      <details class="settings-details">
+        <summary>Stick appearance</summary>
+        <div class="details-content">
+          <label>Left-stick color
+            <div class="color-setting">
+              <input id="leftStickColor" type="color" value="#ff1493">
+              <input id="leftStickColorText" type="text" value="#FF1493" maxlength="7">
+            </div>
+          </label>
+
+          <label>Right-stick color
+            <div class="color-setting">
+              <input id="rightStickColor" type="color" value="#00e5ff">
+              <input id="rightStickColorText" type="text" value="#00E5FF" maxlength="7">
+            </div>
+          </label>
+
+          <button id="resetStickColorsBtn" class="ghost small full-width">Reset colors</button>
+        </div>
+      </details>
+
+      <details class="settings-details analysis-details">
+        <summary>Training analysis</summary>
+        <div class="details-content">
+          <div class="analysis-heading">Weak inputs</div>
+          <div id="weakButtons" class="analysis-list">No data yet</div>
+          <div class="analysis-heading">Slow transitions</div>
+          <div id="slowTransitions" class="analysis-list">No data yet</div>
+        </div>
+      </details>
+
+      <div class="compatibility-settings" aria-hidden="true">
+        <select id="trainingLayoutSelect"><option value="auto" selected>Automatic</option></select>
+        <input id="trackingDuration" type="number" value="15">
+        <button id="applyApexDefaultsBtn" type="button"></button>
+        <input id="stickTrailsToggle" type="checkbox">
+        <input id="hideOnTargetToggle" type="checkbox">
+        <input id="dynamicFocusToggle" type="checkbox">
+        <input id="stickOffsetSlider" type="range" value="0">
+        <span id="stickOffsetValue">0</span>
+        <input id="angleTolerance" type="range" value="18">
+        <span id="angleToleranceValue">18</span>
+        <input id="distanceTolerance" type="range" value="18">
+        <span id="distanceToleranceValue">18</span>
+        <input id="adaptiveToggle" type="checkbox">
+        <input id="adaptiveTimerToggle" type="checkbox">
+      </div>
+    </aside>
+  </div>
+
+  <div id="summaryModal" class="modal hidden">
+    <div class="modal-card">
+      <span class="eyebrow">Session complete</span>
+      <h2>Session Results</h2>
+      <div class="report-grid">
+        <div><span>APM</span><strong id="reportApm">0</strong></div>
+        <div><span>Peak APM</span><strong id="reportPeak">0</strong></div>
+        <div><span>Accuracy</span><strong id="reportAccuracy">100%</strong></div>
+        <div><span>Avg transition</span><strong id="reportTransition">—</strong></div>
+        <div><span>Longest combo</span><strong id="reportCombo">0</strong></div>
+        <div><span>Weakest input</span><strong id="reportWeakest">—</strong></div>
+      </div>
+      <div id="reportRecommendation" class="report-note compatibility-ui"></div>
+      <div class="summary-actions">
+        <button id="retrySessionBtn" class="primary">Retry</button>
+        <button id="closeSummaryBtn" class="ghost">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="script.js"></script>
+</body>
+</html>
