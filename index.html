@@ -373,33 +373,28 @@
             </div>
           </details>
 
-          <details class="settings-details mode-setting" data-modes="sticks,dualsticks,strafeaim,dualtrack,reactivetrack,gamescenario" open>
-            <summary>Stick feel</summary>
-            <div class="details-content">
-              <div class="mode-setting" data-modes="sticks,dualsticks">
-                <label class="field">Directions
-                  <select id="angleSteps">
-                    <option value="8">8 directions</option>
-                    <option value="16" selected>16 directions</option>
-                    <option value="32">32 directions</option>
-                  </select>
-                </label>
+          <div class="mode-setting" data-modes="sticks,dualsticks">
+            <label class="field">Directions
+              <select id="angleSteps">
+                <option value="8">8 directions</option>
+                <option value="16" selected>16 directions</option>
+                <option value="32">32 directions</option>
+              </select>
+            </label>
 
-                <label class="field">Target distance
-                  <select id="distanceMode">
-                    <option value="fine">Inner</option>
-                    <option value="mixed" selected>Mixed</option>
-                    <option value="outer">Outer</option>
-                  </select>
-                </label>
+            <label class="field">Target distance
+              <select id="distanceMode">
+                <option value="fine">Inner</option>
+                <option value="mixed" selected>Mixed</option>
+                <option value="outer">Outer</option>
+              </select>
+            </label>
 
-                <label class="field">Hold time
-                  <input id="holdDuration" type="range" min="0" max="600" step="50" value="100">
-                  <small><span id="holdDurationValue">100</span> ms</small>
-                </label>
-              </div>
-            </div>
-          </details>
+            <label class="field">Hold time
+              <input id="holdDuration" type="range" min="0" max="600" step="50" value="100">
+              <small><span id="holdDurationValue">100</span> ms</small>
+            </label>
+          </div>
 
           <details class="settings-details mode-setting moving-target-settings" data-modes="strafeaim,dualtrack,reactivetrack,gamescenario" open>
             <summary>Moving Target Settings</summary>

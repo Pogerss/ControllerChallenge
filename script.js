@@ -528,8 +528,8 @@ function newRound(){
   const scenario=selected==="mixed"?choices[Math.floor(Math.random()*choices.length)]:selected;
   S.scenarioName=scenario;
   S.stickTargets=[
-   {side:"ls",angle:0,distance:.35,role:"scenario-left"},
-   {side:"rs",angle:180,distance:.45,role:"scenario-right"}
+   {side:"ls",angle:0,distance:.28,role:"scenario-left"},
+   {side:"rs",angle:180,distance:.38,role:"scenario-right"}
   ];
   S.trackingStart=now;
   S.trackingEnd=now+trackingIntervalMs();
@@ -538,8 +538,9 @@ function newRound(){
   S.scenarioRightOnMs=0;
   S.trackingLastFrame=now;
   const amount=+$("leftMovementAmount").value;
-  S.scenarioLeft={x:Math.random()<.5?-amount:amount,y:0,targetX:Math.random()<.5?-amount:amount,nextChange:now+700};
-  S.scenarioRight={x:0,y:0,vx:.35,vy:-.25,nextChange:now+300,nextJump:now+1200};
+  const initialDirection=Math.random()<.5?-1:1;
+  S.scenarioLeft={x:initialDirection*amount*.55,y:0,targetX:initialDirection*amount,nextChange:now+650};
+  S.scenarioRight={x:0,y:0,vx:.24,vy:-.16,nextChange:now+420,nextJump:now+1400};
   S.roundLimit=trackingIntervalMs();
   S.deadline=S.trackingEnd;
  }
@@ -560,7 +561,7 @@ const MOVING_MODE_DESCRIPTIONS={
  strafeaim:"Track continuously while matching a slower left-stick strafe target and a more precise right-stick aim target.",
  dualtrack:"Track two independently moving targets at the same time.",
  reactivetrack:"React to readable direction changes without target teleporting.",
- gamescenario:"Practice realistic movement rhythm: smaller left-stick strafes with more active right-stick aim."
+ gamescenario:"Practice combat movement rhythm: deliberate left-stick strafes with active right-stick aim control."
 };
 
 let audioContext=null;
@@ -800,7 +801,7 @@ function renderStickPrompt(){
   setDot(side+"TargetDot",t.angle,t.distance);
  }
 
- if(S.mode==="strafeaim"||S.mode==="dualtrack"||S.mode==="reactivetrack"||S.mode==="gamescenario"){
+ if(S.mode==="dualtrack"||S.mode==="reactivetrack"||S.mode==="gamescenario"){
   $("prompt").textContent=S.mode==="reactivetrack"?"REACT TO BOTH TARGETS":S.mode==="gamescenario"?"MOVE + AIM":"TRACK BOTH TARGETS";
   $("sequenceStrip").textContent=S.mode==="reactivetrack"?"Follow abrupt movements with both sticks":S.mode==="gamescenario"?"Use relaxed movement control while keeping aim precise":"Keep both live dots close to their moving targets";
   $("hint").textContent=S.mode==="reactivetrack"?"React to unpredictable direction and speed changes":S.mode==="gamescenario"?"Game-like left-stick movement with stricter right-stick aim":"Track two independent targets simultaneously";
@@ -948,38 +949,40 @@ function updateGameScenarioTargets(now){
  const left=S.scenarioLeft;
  const right=S.scenarioRight;
 
- let leftChangeMin=700,leftChangeMax=1250,leftSmooth=3.0;
- let rightSpeed=.48,rightChangeMin=520,rightChangeMax=900;
+ let leftChangeMin=700,leftChangeMax=1250,leftSmooth=2.8;
+ let rightSpeed=.46,rightChangeMin=520,rightChangeMax=900;
+ let rightBias=0.0;
 
  if(scenario==="smg"){
-  leftChangeMin=520;leftChangeMax=900;leftSmooth=3.7;
-  rightSpeed=.62;rightChangeMin=360;rightChangeMax=650;
+  leftChangeMin=500;leftChangeMax=850;leftSmooth=3.2;
+  rightSpeed=.62;rightChangeMin=360;rightChangeMax=650;rightBias=.16;
  }else if(scenario==="shotgun"){
-  leftChangeMin=900;leftChangeMax=1450;leftSmooth=4.2;
-  rightSpeed=.42;rightChangeMin=650;rightChangeMax=1050;
+  leftChangeMin=900;leftChangeMax=1500;leftSmooth=2.1;
+  rightSpeed=.33;rightChangeMin=720;rightChangeMax=1100;rightBias=-.12;
  }else if(scenario==="micro"){
-  leftChangeMin=760;leftChangeMax=1150;leftSmooth=2.8;
-  rightSpeed=.34;rightChangeMin=500;rightChangeMax=820;
+  leftChangeMin=650;leftChangeMax=980;leftSmooth=2.4;
+  rightSpeed=.28;rightChangeMin=480;rightChangeMax=780;rightBias=.08;
  }else if(scenario==="reset"){
-  leftChangeMin=1050;leftChangeMax=1650;leftSmooth=3.5;
-  rightSpeed=.38;rightChangeMin=700;rightChangeMax=1100;
+  leftChangeMin=1050;leftChangeMax=1750;leftSmooth=3.4;
+  rightSpeed=.24;rightChangeMin=760;rightChangeMax=1180;rightBias=-.18;
  }
 
  if(now>=left.nextChange){
-  if(scenario==="reset"&&Math.random()<.45)left.targetX=0;
+  if(scenario==="reset"&&Math.random()<.35)left.targetX=0;
   else{
-   const scale=scenario==="micro"?.55:.78+Math.random()*.22;
-   left.targetX=(Math.random()<.5?-1:1)*amount*scale;
+   const scale=scenario==="micro"?.42:scenario==="shotgun"?.65:.78+Math.random()*.22;
+   const direction=Math.random()<.5?-1:1;
+   left.targetX=direction*amount*scale;
   }
   left.nextChange=now+leftChangeMin+Math.random()*(leftChangeMax-leftChangeMin);
  }
 
  left.x+=(left.targetX-left.x)*Math.min(1,dt*leftSmooth);
- left.y+=(0-left.y)*Math.min(1,dt*6);
+ left.y+=(0-left.y)*Math.min(1,dt*5.5);
 
  if(now>=right.nextChange){
-  const angle=Math.random()*Math.PI*2;
-  const magnitude=rightSpeed*(.75+Math.random()*.25);
+  const angle=(Math.random()*Math.PI*2)+rightBias;
+  const magnitude=rightSpeed*(.78+Math.random()*.22);
   right.vx=Math.cos(angle)*magnitude;
   right.vy=Math.sin(angle)*magnitude;
   right.nextChange=now+rightChangeMin+Math.random()*(rightChangeMax-rightChangeMin);
@@ -989,13 +992,13 @@ function updateGameScenarioTargets(now){
  right.y+=right.vy*dt;
 
  const distance=Math.hypot(right.x,right.y);
- if(distance>.82){
+ if(distance>.86){
   const nx=right.x/distance,ny=right.y/distance;
-  right.x=nx*.82;
-  right.y=ny*.82;
+  right.x=nx*.86;
+  right.y=ny*.86;
   const outward=right.vx*nx+right.vy*ny;
-  right.vx-=1.8*outward*nx;
-  right.vy-=1.8*outward*ny;
+  right.vx-=1.6*outward*nx;
+  right.vy-=1.6*outward*ny;
  }
 
  S.continuousModeLastFrame=now;
@@ -1072,18 +1075,26 @@ function checkSticks(gp,now){
  updateArenaClarity(leftOn,rightOn);
  let all=leftOn&&rightOn;
  if(all){
-  if(S.dualStickHoldLocked){
-   S.holdStart=null;
-   return;
-  }
-  if(S.holdStart==null)S.holdStart=now;
-  if(now-S.holdStart>=+$("holdDuration").value){
-   for(let i=0;i<S.stickTargets.length;i++)registerInputTimestamp(now);
-   completeDualStickPair(now);
+  if(S.mode==="dualsticks"){
+   if(S.dualStickHoldLocked){
+    S.holdStart=null;
+    return;
+   }
+   if(S.holdStart==null)S.holdStart=now;
+   if(now-S.holdStart>=+$("holdDuration").value){
+    for(let i=0;i<S.stickTargets.length;i++)registerInputTimestamp(now);
+    completeDualStickPair(now);
+   }
+  }else{
+   if(S.holdStart==null)S.holdStart=now;
+   if(now-S.holdStart>=+$("holdDuration").value){
+    for(let i=0;i<S.stickTargets.length;i++)registerInputTimestamp(now);
+    completeRound();
+   }
   }
  }else{
   S.holdStart=null;
-  S.dualStickHoldLocked=false;
+  if(S.mode==="dualsticks")S.dualStickHoldLocked=false;
  }
 }
 function liveApm(now){
