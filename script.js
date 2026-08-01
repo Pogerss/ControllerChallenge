@@ -26,7 +26,7 @@ const S={
  peakApm:0,inputTimes:[],transitionTimes:[],buttonStats:saved.buttonStats||{},
  transitionStats:saved.transitionStats||{},lastInputAt:null,lastButton:null,
  hesitations:0,recoveryTimes:[],lastMissAt:null,stickTargets:[],holdStart:null,
- successWindow:[],lifeSessions:saved.lifeSessions||0,lifeInputs:saved.lifeInputs||0,
+ dualStickHoldLocked:false,successWindow:[],lifeSessions:saved.lifeSessions||0,lifeInputs:saved.lifeInputs||0,
  trackingStart:0,trackingEnd:0,trackingOnTargetMs:0,trackingLastFrame:0,
  trackingPhaseLeft:0,trackingPhaseRight:Math.PI,trackingWanderLeft:{x:0,y:0,vx:.2,vy:.15},
  trackingWanderRight:{x:0,y:0,vx:-.15,vy:.2},
@@ -467,7 +467,7 @@ function newRound(){
  if(!S.running||S.paused)return;
  S.trackingWasOnTarget=false;
  clearTrails();
- S.stickTargets=[];S.holdStart=null;S.lastButton=null;
+ S.stickTargets=[];S.holdStart=null;S.dualStickHoldLocked=false;S.lastButton=null;
  let len=+$("sequenceLength").value;
  if(S.mode==="sticks")S.stickTargets=[makeStickTarget(Math.random()<.5?"ls":"rs")];
  else if(S.mode==="dualsticks")S.stickTargets=[makeStickTarget("ls"),makeStickTarget("rs")];
@@ -667,6 +667,21 @@ function completeRound(){
  updateChallenges();
  tone(true);persist();updateUI();newRound();
 }
+
+function completeDualStickPair(now){
+ if(S.mode!="dualsticks")return;
+ const ms=Math.round(now-S.start);
+ S.hits++;S.sessionSequences++;S.currentCombo++;
+ S.longestCombo=Math.max(S.longestCombo,S.currentCombo);
+ if(!S.bestSequence||ms<S.bestSequence)S.bestSequence=ms;
+ S.successWindow.push(true);
+ S.challenge.dual100++;
+ S.stickTargets=[makeStickTarget("ls"),makeStickTarget("rs")];
+ S.holdStart=null;
+ S.dualStickHoldLocked=true;
+ updateChallenges();
+ tone(true);persist();updateUI();render();
+}
 function failRound(options={}){
  if(!S.running||S.paused)return;
  S.misses++;S.currentCombo=0;S.lastMissAt=performance.now();S.successWindow.push(false);
@@ -711,7 +726,8 @@ function angleName(a){
 function targetGeometry(){
  const arena=$("sharedArena");
  if(arena){
-  const size=arena.getBoundingClientRect().width;
+  const rect=arena.getBoundingClientRect();
+  const size=Math.min(rect.width,rect.height)||rect.width||rect.height;
   return{center:size/2,radius:size*.455};
  }
  return{center:85,radius:72};
@@ -1056,12 +1072,19 @@ function checkSticks(gp,now){
  updateArenaClarity(leftOn,rightOn);
  let all=leftOn&&rightOn;
  if(all){
+  if(S.dualStickHoldLocked){
+   S.holdStart=null;
+   return;
+  }
   if(S.holdStart==null)S.holdStart=now;
   if(now-S.holdStart>=+$("holdDuration").value){
    for(let i=0;i<S.stickTargets.length;i++)registerInputTimestamp(now);
-   completeRound();
+   completeDualStickPair(now);
   }
- }else S.holdStart=null;
+ }else{
+  S.holdStart=null;
+  S.dualStickHoldLocked=false;
+ }
 }
 function liveApm(now){
  let cutoff=now-10000,recent=S.inputTimes.filter(t=>t>=cutoff);
