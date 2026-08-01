@@ -228,7 +228,8 @@ const V8_SETTING_IDS=[
  "stickDeadzone","stickResponseCurve","angleSteps","distanceMode","holdDuration",
  "strafeIntensity","aimTargetStyle","trackingSpeed","trackingPattern",
  "reactiveIntensity","gameScenarioType","leftMovementAmount","leftStickLeniency",
- "trackingTargetSize","trackingDuration","timeSlider","soundToggle","completedToggle"
+ "trackingTargetSize","trackingDuration","timeSlider","soundToggle","completedToggle",
+ "masterVolume","hitSoundSelect","completionSoundToggle"
 ];
 
 function stickFeel(x,y){
@@ -314,6 +315,7 @@ function loadV8Settings(){
  applyDifficulty(+$("trainingDifficulty").value||3,false);
  $("stickDeadzoneValue").textContent=$("stickDeadzone").value;
  $("holdDurationValue").textContent=$("holdDuration").value;
+ updateAudioSummary();
 
  const left=$("leftStickColor")?.value||DEFAULT_LEFT_STICK_COLOR;
  const right=$("rightStickColor")?.value||DEFAULT_RIGHT_STICK_COLOR;
@@ -325,7 +327,10 @@ function bindV8Settings(){
   const element=$(id);
   if(!element)continue;
   const event=(element.type==="range"||element.type==="color")?"input":"change";
-  element.addEventListener(event,saveV8Settings);
+  element.addEventListener(event,()=>{
+   if(["masterVolume","soundToggle","hitSoundSelect","completionSoundToggle"].includes(id))updateAudioSummary();
+   saveV8Settings();
+  });
  }
 }
 
@@ -559,6 +564,14 @@ const MOVING_MODE_DESCRIPTIONS={
 };
 
 let audioContext=null;
+const AUDIO_PROFILES={
+ classic:{oscillator:"sine",target:{freq1:660,freq2:880,duration:.07,base:.055,ramp:.045},complete:{freq1:520,freq2:1040,duration:.14,base:.07,ramp:.10},error:{freq1:180,freq2:220,duration:.08,base:.04,ramp:.04}},
+ arcade:{oscillator:"square",target:{freq1:780,freq2:1120,duration:.06,base:.06,ramp:.04},complete:{freq1:560,freq2:900,duration:.12,base:.065,ramp:.09},error:{freq1:220,freq2:280,duration:.08,base:.04,ramp:.04}},
+ mechanical:{oscillator:"triangle",target:{freq1:420,freq2:620,duration:.065,base:.05,ramp:.03},complete:{freq1:360,freq2:520,duration:.11,base:.06,ramp:.075},error:{freq1:160,freq2:200,duration:.07,base:.035,ramp:.03}},
+ soft:{oscillator:"sine",target:{freq1:500,freq2:700,duration:.08,base:.05,ramp:.05},complete:{freq1:440,freq2:680,duration:.13,base:.06,ramp:.10},error:{freq1:200,freq2:240,duration:.07,base:.03,ramp:.04}},
+ synth:{oscillator:"sawtooth",target:{freq1:720,freq2:980,duration:.06,base:.055,ramp:.04},complete:{freq1:600,freq2:840,duration:.12,base:.065,ramp:.09},error:{freq1:260,freq2:320,duration:.08,base:.04,ramp:.04}}
+};
+
 function getAudioContext(){
  if(!audioContext){
   const AudioContextClass=window.AudioContext||window.webkitAudioContext;
@@ -568,38 +581,51 @@ function getAudioContext(){
  return audioContext;
 }
 
+function getMasterVolumePercent(){
+ return Math.max(0,Math.min(100,+(($("masterVolume")?.value)||70)));
+}
+
+function getSelectedHitSoundProfile(){
+ const profile=$("hitSoundSelect")?.value||"classic";
+ return profile==="off"?"classic":profile;
+}
+
+function updateAudioSummary(){
+ const summary=$("audioSummary");
+ const output=$("masterVolumeValue");
+ const volumeValue=Math.round(getMasterVolumePercent());
+ if(output)output.textContent=volumeValue+"%";
+ if(summary){
+  const selected=$("hitSoundSelect")?.value||"classic";
+  const label=selected==="off"?"Off":selected.charAt(0).toUpperCase()+selected.slice(1);
+  summary.textContent=`${volumeValue}% • ${label}`;
+ }
+}
+
 function playFeedbackSound(type){
  if(!$("soundToggle")?.checked)return;
+ if(type==="target"&&($("hitSoundSelect")?.value||"classic")==="off")return;
+ if(type==="complete"&&!$("completionSoundToggle")?.checked)return;
  const context=getAudioContext();
  if(!context)return;
 
  const now=context.currentTime;
+ const profileName=getSelectedHitSoundProfile();
+ const profile=AUDIO_PROFILES[profileName]||AUDIO_PROFILES.classic;
+ const spec=type==="complete"?profile.complete:type==="error"?profile.error:profile.target;
  const oscillator=context.createOscillator();
  const gain=context.createGain();
+ oscillator.type=profile.oscillator;
  oscillator.connect(gain);
  gain.connect(context.destination);
 
- if(type==="target"){
-  oscillator.frequency.setValueAtTime(660,now);
-  oscillator.frequency.exponentialRampToValueAtTime(880,now+.045);
-  gain.gain.setValueAtTime(.055,now);
-  gain.gain.exponentialRampToValueAtTime(.001,now+.07);
-  oscillator.start(now);
-  oscillator.stop(now+.075);
- }else if(type==="complete"){
-  oscillator.frequency.setValueAtTime(520,now);
-  oscillator.frequency.exponentialRampToValueAtTime(1040,now+.10);
-  gain.gain.setValueAtTime(.075,now);
-  gain.gain.exponentialRampToValueAtTime(.001,now+.14);
-  oscillator.start(now);
-  oscillator.stop(now+.15);
- }else{
-  oscillator.frequency.setValueAtTime(180,now);
-  gain.gain.setValueAtTime(.04,now);
-  gain.gain.exponentialRampToValueAtTime(.001,now+.08);
-  oscillator.start(now);
-  oscillator.stop(now+.085);
- }
+ const volume=getMasterVolumePercent()/100;
+ oscillator.frequency.setValueAtTime(spec.freq1,now);
+ oscillator.frequency.exponentialRampToValueAtTime(spec.freq2,now+spec.ramp);
+ gain.gain.setValueAtTime(spec.base*volume,now);
+ gain.gain.exponentialRampToValueAtTime(.001,now+spec.duration);
+ oscillator.start(now);
+ oscillator.stop(now+spec.duration+.01);
 }
 
 function updateMovingModeDescription(){

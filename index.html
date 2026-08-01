@@ -320,195 +320,264 @@
         </div>
       </div>
 
-      <div class="settings-group primary-settings">
-        <label>Controller
-          <select id="layoutSelect">
-            <option value="xbox" selected>Xbox</option>
-            <option value="playstation">PlayStation / PS4</option>
-          </select>
-        </label>
+      <section class="settings-section settings-section--primary">
+        <div class="settings-section-heading">
+          <div class="section-title">Session</div>
+          <p class="settings-section-copy">Core session pacing and challenge intensity.</p>
+        </div>
+        <div class="settings-group primary-settings">
+          <label class="field">Difficulty
+            <input id="trainingDifficulty" type="range" min="1" max="5" step="1" value="3">
+            <small><span id="trainingDifficultyValue">3</span>/5 · <span id="trainingDifficultyName">Standard</span></small>
+          </label>
 
-        <label>Difficulty
-          <input id="trainingDifficulty" type="range" min="1" max="5" step="1" value="3">
-          <small><span id="trainingDifficultyValue">3</span>/5 · <span id="trainingDifficultyName">Standard</span></small>
-        </label>
+          <label class="field">Session
+            <div class="number-setting">
+              <input id="sessionDurationMinutes" type="number" min="1" max="180" step="1" value="10">
+              <span>minutes</span>
+            </div>
+          </label>
 
-        <label>Session
-          <div class="number-setting">
-            <input id="sessionDurationMinutes" type="number" min="1" max="180" step="1" value="10">
-            <span>minutes</span>
-          </div>
-        </label>
+          <label class="toggle mode-setting" data-modes="dualsticks,strafeaim,dualtrack,reactivetrack,gamescenario">
+            Infinite session <input id="infiniteStickSession" type="checkbox">
+          </label>
+        </div>
+      </section>
 
-        <label class="toggle mode-setting" data-modes="dualsticks,strafeaim,dualtrack,reactivetrack,gamescenario">
-          Infinite session <input id="infiniteStickSession" type="checkbox">
-        </label>
-      </div>
+      <section class="settings-section settings-section--primary">
+        <div class="settings-section-heading">
+          <div class="section-title">Current Mode</div>
+          <p class="settings-section-copy">Mode-specific controls adjust to the active drill.</p>
+        </div>
+        <div class="settings-section-body">
+          <details class="settings-details mode-setting" data-modes="sequence,simultaneous" open>
+            <summary>Button drill</summary>
+            <div class="details-content">
+              <label class="field">Sequence length
+                <select id="sequenceLength">
+                  <option value="3">3</option>
+                  <option value="4" selected>4</option>
+                  <option value="5">5</option>
+                  <option value="6">6</option>
+                  <option value="8">8</option>
+                  <option value="10">10</option>
+                </select>
+              </label>
 
-      <details class="settings-details mode-setting" data-modes="sequence,simultaneous" open>
-        <summary>Button drill</summary>
-        <div class="details-content">
-          <label>Sequence length
-            <select id="sequenceLength">
-              <option value="3">3</option>
-              <option value="4" selected>4</option>
-              <option value="5">5</option>
-              <option value="6">6</option>
-              <option value="8">8</option>
-              <option value="10">10</option>
+              <label class="field">Prompt time
+                <input id="timeSlider" type="range" min="900" max="5000" step="50" value="2200">
+                <small id="timeLabel">Hard</small>
+              </label>
+
+              <label class="toggle">Show completed inputs <input id="completedToggle" type="checkbox" checked></label>
+            </div>
+          </details>
+
+          <details class="settings-details mode-setting" data-modes="sticks,dualsticks,strafeaim,dualtrack,reactivetrack,gamescenario" open>
+            <summary>Stick feel</summary>
+            <div class="details-content">
+              <div class="mode-setting" data-modes="sticks,dualsticks">
+                <label class="field">Directions
+                  <select id="angleSteps">
+                    <option value="8">8 directions</option>
+                    <option value="16" selected>16 directions</option>
+                    <option value="32">32 directions</option>
+                  </select>
+                </label>
+
+                <label class="field">Target distance
+                  <select id="distanceMode">
+                    <option value="fine">Inner</option>
+                    <option value="mixed" selected>Mixed</option>
+                    <option value="outer">Outer</option>
+                  </select>
+                </label>
+
+                <label class="field">Hold time
+                  <input id="holdDuration" type="range" min="0" max="600" step="50" value="100">
+                  <small><span id="holdDurationValue">100</span> ms</small>
+                </label>
+              </div>
+            </div>
+          </details>
+
+          <details class="settings-details mode-setting moving-target-settings" data-modes="strafeaim,dualtrack,reactivetrack,gamescenario" open>
+            <summary>Moving Target Settings</summary>
+            <div class="details-content">
+              <div id="movingModeDescription" class="mode-description">Controls for continuous tracking drills.</div>
+              <label class="field">Target speed
+                <select id="trackingSpeed">
+                  <option value="0.45">Slow</option>
+                  <option value="0.75" selected>Standard</option>
+                  <option value="1.10">Fast</option>
+                  <option value="1.45">Extreme</option>
+                </select>
+              </label>
+
+              <label class="field">Target size
+                <select id="trackingTargetSize">
+                  <option value="0.20">Large</option>
+                  <option value="0.14" selected>Standard</option>
+                  <option value="0.09">Small</option>
+                </select>
+              </label>
+
+              <div class="mode-setting" data-modes="strafeaim">
+                <label class="field">Strafe distance
+                  <select id="strafeIntensity">
+                    <option value="0.45" selected>Small</option>
+                    <option value="0.70">Medium</option>
+                    <option value="0.90">Wide</option>
+                  </select>
+                </label>
+                <label class="field">Aim range
+                  <select id="aimTargetStyle">
+                    <option value="fine">Fine</option>
+                    <option value="mixed" selected>Mixed</option>
+                    <option value="outer">Wide</option>
+                  </select>
+                </label>
+              </div>
+
+              <div class="mode-setting" data-modes="dualtrack">
+                <label class="field">Movement pattern
+                  <select id="trackingPattern">
+                    <option value="circle">Circles</option>
+                    <option value="figure8">Figure 8</option>
+                    <option value="wander" selected>Wander</option>
+                    <option value="opposite">Opposite</option>
+                  </select>
+                </label>
+              </div>
+
+              <div class="mode-setting" data-modes="reactivetrack">
+                <label class="field">Reaction speed
+                  <select id="reactiveIntensity">
+                    <option value="easy">Controlled</option>
+                    <option value="standard" selected>Standard</option>
+                    <option value="hard">Fast</option>
+                  </select>
+                </label>
+              </div>
+
+              <div class="mode-setting" data-modes="gamescenario">
+                <label class="field">Scenario
+                  <select id="gameScenarioType">
+                    <option value="mixed" selected>Mixed combat</option>
+                    <option value="smg">SMG tracking</option>
+                    <option value="shotgun">Shotgun peeks</option>
+                    <option value="micro">Micro strafes</option>
+                    <option value="reset">Reset and re-center</option>
+                  </select>
+                </label>
+
+                <label class="field">Movement amount
+                  <select id="leftMovementAmount">
+                    <option value="0.32" selected>Small</option>
+                    <option value="0.48">Medium</option>
+                    <option value="0.65">Wide</option>
+                  </select>
+                </label>
+
+                <label class="field">Movement forgiveness
+                  <select id="leftStickLeniency">
+                    <option value="0.30">High</option>
+                    <option value="0.22" selected>Standard</option>
+                    <option value="0.15">Low</option>
+                  </select>
+                </label>
+              </div>
+            </div>
+          </details>
+        </div>
+      </section>
+
+      <details class="settings-section settings-section--collapsible">
+        <summary class="settings-summary">
+          <span class="settings-summary-title">Audio</span>
+          <span class="settings-summary-meta">
+            <span id="audioSummary" class="settings-summary-value">70% • Classic</span>
+            <span class="settings-summary-indicator">+</span>
+          </span>
+        </summary>
+        <div class="settings-section-body">
+          <label class="field">Master Volume
+            <div class="audio-range">
+              <input id="masterVolume" type="range" min="0" max="100" step="1" value="70">
+              <output id="masterVolumeValue" class="value-pill" for="masterVolume">70%</output>
+            </div>
+          </label>
+
+          <label class="toggle switch-row">
+            <span>Audio feedback</span>
+            <span class="switch">
+              <input id="soundToggle" type="checkbox" checked>
+              <span class="switch-knob"></span>
+            </span>
+          </label>
+
+          <label class="field">Hit Sound
+            <select id="hitSoundSelect">
+              <option value="off">Off</option>
+              <option value="classic" selected>Classic</option>
+              <option value="arcade">Arcade</option>
+              <option value="mechanical">Mechanical</option>
+              <option value="soft">Soft</option>
+              <option value="synth">Synth</option>
             </select>
           </label>
 
-          <label>Prompt time
-            <input id="timeSlider" type="range" min="900" max="5000" step="50" value="2200">
-            <small id="timeLabel">Hard</small>
+          <label class="toggle switch-row">
+            <span>Completion sound</span>
+            <span class="switch">
+              <input id="completionSoundToggle" type="checkbox" checked>
+              <span class="switch-knob"></span>
+            </span>
           </label>
-
-          <label class="toggle">Audio feedback <input id="soundToggle" type="checkbox" checked></label>
-          <label class="toggle">Show completed inputs <input id="completedToggle" type="checkbox" checked></label>
         </div>
       </details>
 
-      <details class="settings-details mode-setting" data-modes="sticks,dualsticks,strafeaim,dualtrack,reactivetrack,gamescenario" open>
-        <summary>Stick feel</summary>
-        <div class="details-content">
-          <label>Deadzone
+      <details class="settings-section settings-section--collapsible">
+        <summary class="settings-summary">
+          <span>Controller Setup</span>
+          <span class="settings-summary-indicator">+</span>
+        </summary>
+        <div class="settings-section-body">
+          <label class="field">Controller
+            <select id="layoutSelect">
+              <option value="xbox" selected>Xbox</option>
+              <option value="playstation">PlayStation / PS4</option>
+            </select>
+          </label>
+
+          <label class="field">Deadzone
             <input id="stickDeadzone" type="range" min="0" max="15" step="0.5" value="3">
             <small><span id="stickDeadzoneValue">3</span>%</small>
           </label>
 
-          <label>Response curve
+          <label class="field">Response curve
             <select id="stickResponseCurve">
               <option value="linear" selected>Linear</option>
               <option value="classic">Classic-style</option>
             </select>
           </label>
-
-          <div class="mode-setting" data-modes="sticks,dualsticks">
-            <label>Directions
-              <select id="angleSteps">
-                <option value="8">8 directions</option>
-                <option value="16" selected>16 directions</option>
-                <option value="32">32 directions</option>
-              </select>
-            </label>
-
-            <label>Target distance
-              <select id="distanceMode">
-                <option value="fine">Inner</option>
-                <option value="mixed" selected>Mixed</option>
-                <option value="outer">Outer</option>
-              </select>
-            </label>
-
-            <label>Hold time
-              <input id="holdDuration" type="range" min="0" max="600" step="50" value="100">
-              <small><span id="holdDurationValue">100</span> ms</small>
-            </label>
-          </div>
         </div>
       </details>
 
-      <details class="settings-details mode-setting moving-target-settings" data-modes="strafeaim,dualtrack,reactivetrack,gamescenario" open>
-        <summary>Moving Target Settings</summary>
-        <div class="details-content">
-          <div id="movingModeDescription" class="mode-description">Controls for continuous tracking drills.</div>
-          <label>Target speed
-            <select id="trackingSpeed">
-              <option value="0.45">Slow</option>
-              <option value="0.75" selected>Standard</option>
-              <option value="1.10">Fast</option>
-              <option value="1.45">Extreme</option>
-            </select>
-          </label>
-
-          <label>Target size
-            <select id="trackingTargetSize">
-              <option value="0.20">Large</option>
-              <option value="0.14" selected>Standard</option>
-              <option value="0.09">Small</option>
-            </select>
-          </label>
-
-          <div class="mode-setting" data-modes="strafeaim">
-            <label>Strafe distance
-              <select id="strafeIntensity">
-                <option value="0.45" selected>Small</option>
-                <option value="0.70">Medium</option>
-                <option value="0.90">Wide</option>
-              </select>
-            </label>
-            <label>Aim range
-              <select id="aimTargetStyle">
-                <option value="fine">Fine</option>
-                <option value="mixed" selected>Mixed</option>
-                <option value="outer">Wide</option>
-              </select>
-            </label>
-          </div>
-
-          <div class="mode-setting" data-modes="dualtrack">
-            <label>Movement pattern
-              <select id="trackingPattern">
-                <option value="circle">Circles</option>
-                <option value="figure8">Figure 8</option>
-                <option value="wander" selected>Wander</option>
-                <option value="opposite">Opposite</option>
-              </select>
-            </label>
-          </div>
-
-          <div class="mode-setting" data-modes="reactivetrack">
-            <label>Reaction speed
-              <select id="reactiveIntensity">
-                <option value="easy">Controlled</option>
-                <option value="standard" selected>Standard</option>
-                <option value="hard">Fast</option>
-              </select>
-            </label>
-          </div>
-
-          <div class="mode-setting" data-modes="gamescenario">
-            <label>Scenario
-              <select id="gameScenarioType">
-                <option value="mixed" selected>Mixed combat</option>
-                <option value="smg">SMG tracking</option>
-                <option value="shotgun">Shotgun peeks</option>
-                <option value="micro">Micro strafes</option>
-                <option value="reset">Reset and re-center</option>
-              </select>
-            </label>
-
-            <label>Movement amount
-              <select id="leftMovementAmount">
-                <option value="0.32" selected>Small</option>
-                <option value="0.48">Medium</option>
-                <option value="0.65">Wide</option>
-              </select>
-            </label>
-
-            <label>Movement forgiveness
-              <select id="leftStickLeniency">
-                <option value="0.30">High</option>
-                <option value="0.22" selected>Standard</option>
-                <option value="0.15">Low</option>
-              </select>
-            </label>
-          </div>
-        </div>
-      </details>
-
-      <details class="settings-details">
-        <summary>Stick appearance</summary>
-        <div class="details-content">
-          <label>Left-stick color
+      <details class="settings-section settings-section--collapsible">
+        <summary class="settings-summary">
+          <span>Appearance</span>
+          <span class="settings-summary-indicator">+</span>
+        </summary>
+        <div class="settings-section-body">
+          <label class="field">Left-stick color
             <div class="color-setting">
               <input id="leftStickColor" type="color" value="#ff1493">
               <input id="leftStickColorText" type="text" value="#FF1493" maxlength="7">
             </div>
           </label>
 
-          <label>Right-stick color
+          <label class="field">Right-stick color
             <div class="color-setting">
               <input id="rightStickColor" type="color" value="#00e5ff">
               <input id="rightStickColorText" type="text" value="#00E5FF" maxlength="7">
@@ -519,9 +588,12 @@
         </div>
       </details>
 
-      <details class="settings-details analysis-details">
-        <summary>Training analysis</summary>
-        <div class="details-content">
+      <details class="settings-section settings-section--collapsible">
+        <summary class="settings-summary">
+          <span>Training Analysis</span>
+          <span class="settings-summary-indicator">+</span>
+        </summary>
+        <div class="settings-section-body">
           <div class="analysis-heading">Weak inputs</div>
           <div id="weakButtons" class="analysis-list">No data yet</div>
           <div class="analysis-heading">Slow transitions</div>
