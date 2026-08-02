@@ -3,16 +3,16 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Controller Trainer v8.2</title>
+  <title>Roller Challenge</title>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
 <div class="app">
   <header class="topbar">
     <div class="brand">
-      <div class="brand-mark">CT</div>
+      <div class="brand-mark">RC</div>
       <div>
-        <h1>Controller Trainer <span>v8.2</span></h1>
+        <h1>Roller Challenge <span>v8.2</span></h1>
         <p>APM · Accuracy · Coordination</p>
       </div>
     </div>
@@ -338,10 +338,10 @@
             <small><span id="trainingDifficultyValue">3</span>/5 · <span id="trainingDifficultyName">Standard</span></small>
           </label>
 
-          <label class="field">Session
+          <label class="field">Session duration
             <div class="number-setting">
-              <input id="sessionDurationMinutes" type="number" min="1" max="180" step="1" value="10">
-              <span>minutes</span>
+              <input id="sessionDurationMinutes" type="number" min="10" max="3600" step="1" value="60">
+              <span>seconds</span>
             </div>
           </label>
 
@@ -583,8 +583,8 @@
           </label>
 
           <label class="field">Deadzone
-            <input id="stickDeadzone" type="range" min="0" max="15" step="0.5" value="3">
-            <small><span id="stickDeadzoneValue">3</span>%</small>
+            <input id="stickDeadzone" type="range" min="0" max="15" step="0.5" value="0">
+            <small><span id="stickDeadzoneValue">0</span>%</small>
           </label>
 
           <label class="field">Response curve

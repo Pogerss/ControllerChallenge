@@ -354,7 +354,7 @@ function applyDifficulty(level,updateControls=true){
 }
 
 function collectV8Settings(){
- const settings={activeMode:S.mode};
+ const settings={activeMode:S.mode,sessionDurationUnit:"seconds"};
  for(const id of V8_SETTING_IDS){
   const element=$(id);
   if(!element)continue;
@@ -373,8 +373,17 @@ function loadV8Settings(){
  let settings=null;
  try{
   settings=JSON.parse(localStorage.getItem(V8_SETTINGS_KEY)||"null");
- }catch(_){}
+ }catch(_){ }
  if(!settings)return;
+
+ if(settings.sessionDurationMinutes!==undefined&&!settings.sessionDurationUnit){
+  const raw=Number(settings.sessionDurationMinutes);
+  if(Number.isFinite(raw)&&raw>=1&&raw<=180){
+   settings.sessionDurationMinutes=String(Math.round(raw*60));
+   settings.sessionDurationUnit="seconds";
+   try{localStorage.setItem(V8_SETTINGS_KEY,JSON.stringify(settings));}catch(_){ }
+  }
+ }
 
  if(settings.activeMode&&document.querySelector(`[data-mode="${settings.activeMode}"]`)){
   S.mode=settings.activeMode;
@@ -422,7 +431,11 @@ function pressureName(ms){if(ms<=1200)return"Extreme";if(ms<=1700)return"Very Ha
 function baseLimit(){return +$("timeSlider").value}
 function trackingIntervalMs(){return Math.max(5,Math.min(120,+$("trackingDuration").value||15))*1000}
 function isInfiniteEligibleMode(){return ["dualsticks","strafeaim","dualtrack","reactivetrack","gamescenario"].includes(S.mode)}
-function sessionLengthMs(){return Math.max(1,Math.min(180,+$("sessionDurationMinutes").value||10))*60000}
+function sessionLengthMs(){
+ const raw=Number($("sessionDurationMinutes")?.value);
+ const seconds=Math.max(10,Math.min(3600,Number.isFinite(raw)&&raw>0?raw:60));
+ return seconds*1000;
+}
 function effectiveLimit(){
  let v=baseLimit();
  if(!$("adaptiveTimerToggle").checked)return v;
@@ -1790,7 +1803,7 @@ function applyApexDefaults(){
  $("leftStickLeniency").value="0.22";
  $("trackingTargetSize").value="0.14";
  $("trackingDuration").value="15";
- $("sessionDurationMinutes").value="10";
+ $("sessionDurationMinutes").value="60";
  $("angleTolerance").value=18;
  $("distanceTolerance").value=18;
  $("holdDuration").value=100;

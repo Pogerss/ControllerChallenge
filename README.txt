@@ -1,4 +1,4 @@
-Controller Trainer v8.2 — Tracking, Audio & UI Visibility
+Roller Challenge v8.2 — Tracking, Audio & UI Visibility
 
 Strafe + Aim:
 - Remains a continuous tracking scenario for the full session.
