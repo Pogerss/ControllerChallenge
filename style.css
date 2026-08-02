@@ -51,6 +51,23 @@ button,select,input{font:inherit}.hidden{display:none!important}.app{max-width:1
   white-space: nowrap;
   pointer-events: none;
 }
+.combat-prompt-badge{
+  grid-column:1 / -1;
+  justify-self:center;
+  align-self:start;
+  padding:8px 14px;
+  border-radius:999px;
+  color:#f7eeff;
+  background:rgba(185,116,255,.12);
+  border:1px solid rgba(185,116,255,.34);
+  font-size:11px;
+  font-weight:900;
+  letter-spacing:.12em;
+  text-transform:uppercase;
+  line-height:1;
+  white-space:nowrap;
+  pointer-events:none;
+}
 .stick-card.strafe-card {
   border-color: rgba(105,233,80,.35);
 }
@@ -453,12 +470,17 @@ button,select,input{font:inherit}.hidden{display:none!important}.app{max-width:1
   order: 2;
 }
 
+.trainer.stick-focused .combat-prompt-badge,
 .trainer.stick-focused .stick-mode-banner {
   order: 3;
 }
 
 .trainer.stick-focused .shared-arena-shell {
   order: 4;
+}
+
+.trainer.stick-focused .stick-mode-banner.hud-context-label {
+  order: 5;
 }
 
 .trainer.stick-focused .tracking-score-panel {
@@ -538,12 +560,42 @@ button,select,input{font:inherit}.hidden{display:none!important}.app{max-width:1
 .target-zone{position:absolute;transform:translate(-50%,-50%);border-radius:50%;pointer-events:none;opacity:.22}
 .left-zone{width:150px;height:150px;border:3px solid var(--left-stick-color);background:rgba(98,227,95,.07)}
 .right-zone{width:96px;height:96px;border:3px solid var(--right-stick-color);background:rgba(55,174,247,.07)}
+.target-direction-arrow{position:absolute;width:12px;height:12px;border-top:3px solid currentColor;border-right:3px solid currentColor;transform-origin:50% 50%;pointer-events:none;z-index:4;opacity:.95;background:transparent}
+.target-direction-arrow::after{content:none}
+.left-arrow{color:var(--left-stick-color);box-shadow:0 0 8px rgba(255,20,147,.16)}
+.right-arrow{color:var(--right-stick-color);box-shadow:0 0 8px rgba(0,229,255,.16)}
 .arena-target-dot,.arena-live-dot{position:absolute;transform:translate(-50%,-50%);border-radius:50%;z-index:5}
 .arena-target-dot{width:30px;height:30px}.left-target-dot{background:var(--left-stick-color);box-shadow:none}.right-target-dot{background:var(--right-stick-color);box-shadow:none}
 .arena-live-dot{width:16px;height:16px;background:#fff}.left-live-dot{border:3px solid var(--left-stick-color);box-shadow:none}.right-live-dot{border:3px solid var(--right-stick-color);box-shadow:none}
 .arena-side-label{position:absolute;top:50%;width:165px;transform:translateY(-50%);display:grid;gap:4px}.arena-left-label{right:calc(100% + 20px);text-align:right}.arena-right-label{left:calc(100% + 20px);text-align:left}
 .arena-side-label span{color:var(--muted);font-size:11px;font-weight:850;letter-spacing:.08em}.arena-side-label strong{font-size:18px}.arena-left-label strong{color:var(--left-stick-color)}.arena-right-label strong{color:var(--right-stick-color)}.arena-side-label small{color:var(--muted)}
 .shared-arena.both-on{border-color:rgba(185,116,255,.55);box-shadow:inset 0 0 50px rgba(0,0,0,.28),0 0 34px rgba(185,116,255,.18)}
+.stick-mode-banner.hud-context-label{
+  max-width:min(700px,100%);
+  padding:0;
+  border:none;
+  border-radius:0;
+  background:transparent;
+  color:var(--blue);
+  font-size:23px;
+  letter-spacing:.08em;
+  line-height:1.45;
+  white-space:normal;
+  text-align:center;
+}
+.combat-cue-label{max-width:min(560px,100%);color:var(--muted);font-size:14px;font-weight:800;letter-spacing:.08em;line-height:1.35;text-align:center;text-transform:uppercase}
+.trainer.mechanic-challenge .stick-mode-banner.hud-context-label{order:5;color:var(--right-stick-color);font-size:28px}
+.trainer.mechanic-challenge .combat-cue-label{order:6}
+.trainer.arena-hud-mode .prompt,
+.trainer.arena-hud-mode .sequence-strip{
+  display:none;
+}
+.trainer.arena-hud-mode .trainer-head{
+  justify-content:flex-end;
+}
+.trainer.arena-hud-mode .trainer-head>div:first-child{
+  display:none;
+}
 @media(max-width:1250px){.arena-side-label{top:auto;bottom:-66px;transform:none;width:42%;text-align:center}.arena-left-label{left:5%;right:auto}.arena-right-label{right:5%;left:auto}.shared-stick-workspace{margin-bottom:70px}}
 @media(max-width:760px){.shared-arena-shell{width:min(88vw,600px)}.arena-target-dot{width:24px;height:24px}.arena-live-dot{width:14px;height:14px}}
 

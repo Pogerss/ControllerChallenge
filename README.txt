@@ -1,4 +1,13 @@
-Roller Challenge v8.2 — Tracking, Audio & UI Visibility
+Roller Challenge v11.4 - High-Transfer Combat Mechanics
+
+Combat mechanic library:
+- Adds Recover, Commit, Pressure Change, Pressure Release, Pressure Ladder,
+  Arc Tracking, Angle Hold, Movement Priority, Aim Priority, and Independent Timing.
+- Every mechanic remains continuous tracking through the shared Combat updater.
+- Motion is parameterized by pressure pattern, path shape, thumb priority, and timing offset.
+- Each mechanic teaches one transferable thumb skill and has a distinct motion signature.
+
+Roller Challenge v8.2 - Tracking, Audio & UI Visibility
 
 Strafe + Aim:
 - Remains a continuous tracking scenario for the full session.

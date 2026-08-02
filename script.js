@@ -15,12 +15,14 @@ const FLOW_PATTERNS=[
  [1,0,7],[6,7,0],[2,3,7],[5,7,0],[1,0,7,2],[6,7,1,0],[2,3,7,0],[5,0,7,1],
  [15,0,7],[12,0,7],[3,2,7],[1,2,7,0],[4,7,0],[0,1,7],[2,7,1],[6,7,2,0]
 ];
+const DEBUG=new URLSearchParams(location.search).get("debug")==="1";
 
 let saved=JSON.parse(localStorage.getItem("ctv5")||"{}");
 const S={
  layout:"xbox",mode:"sequence",preset:"balanced",running:false,paused:false,
  seq:[],full:[],start:0,deadline:0,roundLimit:2500,prev:new Map(),pair:new Set(),
  hits:0,misses:0,sessionInputs:0,sessionSequences:0,sessionStart:0,
+ sessionScore:0,
  currentCombo:0,longestCombo:saved.longestCombo||0,bestSequence:saved.bestSequence||0,
  sessionEnd:Infinity,infiniteSession:false,pauseStartedAt:0,
  peakApm:0,inputTimes:[],transitionTimes:[],buttonStats:saved.buttonStats||{},
@@ -29,12 +31,16 @@ const S={
  dualStickHoldLocked:false,dualStickCompletionLocked:false,dualStickNextPairAt:0,
  dualStickWaitingForRelease:false,dualStickPendingReleaseTargets:[],successWindow:[],lifeSessions:saved.lifeSessions||0,lifeInputs:saved.lifeInputs||0,
  trackingStart:0,trackingEnd:0,trackingOnTargetMs:0,trackingLastFrame:0,
+ sessionTrackingOnTargetMs:0,sessionTrackingElapsedMs:0,
  trackingPhaseLeft:0,trackingPhaseRight:Math.PI,trackingWanderLeft:{x:0,y:0,vx:.2,vy:.15},
  trackingWanderRight:{x:0,y:0,vx:-.15,vy:.2},
  reactiveLeft:{x:0,y:0,vx:0,vy:0,nextChange:0,nextJump:0,pauseUntil:0},
  reactiveRight:{x:0,y:0,vx:0,vy:0,nextChange:0,nextJump:0,pauseUntil:0},
- scenarioLeft:{x:0,y:0,targetX:0,nextChange:0},
- scenarioRight:{x:0,y:0,vx:0,vy:0,nextChange:0,nextJump:0},
+ scenarioLeft:{x:0,y:0,vx:0,vy:0,targetVx:0,targetVy:0,speed:0,targetX:0,targetY:0,nextChange:0},
+ scenarioRight:{x:0,y:0,vx:0,vy:0,targetVx:0,targetVy:0,speed:0,targetX:0,targetY:0,nextChange:0,nextJump:0},
+ currentCombatMechanicId:null,combatMechanicHistory:[],
+ combatActivationCounts:{},combatRoleSwap:false,scenarioMotionStartedAt:0,
+ mechanicTrace:null,
  scenarioName:"",weaponStyle:"",conceptName:"",scenarioLeftOnMs:0,scenarioRightOnMs:0,
  challenge:saved.challenge||{accuracy100:0,combo50:0,apm300:0,dual100:0},
  leftTrailPoints:[],rightTrailPoints:[],leftOnTarget:false,rightOnTarget:false,
@@ -43,6 +49,8 @@ const S={
  continuousModeLastFrame:0,
  trackingWasOnTarget:false,
  trackingHitSoundAt:0,
+ trackingScoreRemainderMs:0,
+ scoreFinalized:false,
  controllerIndex:null,
  controllerConnected:false,
  controllerLabel:"",
@@ -51,6 +59,8 @@ const S={
  challengeCurrentMode:null,
  challengeCompletedModes:[],
  challengeModeStats:{},
+ analysisRenderKey:"",
+ challengeRenderKey:"",
  combatStylesPracticed:[],
  combatConceptsPracticed:[],
  challengeSwitchPending:false,
@@ -64,10 +74,13 @@ const S={
  challengeType:"full",
  challengeScenarioPreset:null,
  challengeFocusSnapToken:0,
+ challengePendingSnapFamily:null,
  challengePreviousFocusFamily:null,
  challengeCurrentFocusFamily:null,
  challengeFirstScenarioSnapPending:true,
+ challengeSnapFrame:0,
  challengeSessionFinalized:false,
+ resultsActionLocked:false,
  simultaneousButtonArmed:true,
  simultaneousButtonFirstPressAt:0,
  simultaneousButtonFirstPressButton:null,
@@ -165,18 +178,21 @@ function isStickHeavyMode(){
 }
 
 function isContinuousTrackingMode(){
- return ["strafeaim","dualtrack","reactivetrack","gamescenario"].includes(S.mode);
+ return ["strafeaim","dualtrack","reactivetrack"].includes(S.mode)||(S.mode==="gamescenario"&&isContinuousCombatMechanic());
 }
 
 function applyTrainingLayout(){
  const choice=$("trainingLayoutSelect")?.value||"auto";
  const stickFocused=choice==="sticks"||(choice==="auto"&&isStickHeavyMode());
  const trackingFocused=stickFocused&&isContinuousTrackingMode();
+ const arenaHudMode=["strafeaim","dualtrack","reactivetrack","gamescenario"].includes(S.mode);
  const trainer=$("trainerPanel");
  trainer.classList.toggle("challenge-active",S.challengeMode);
  trainer.classList.toggle("stick-focused",stickFocused);
  trainer.classList.toggle("button-focused",!stickFocused);
  trainer.classList.toggle("tracking-focused",trackingFocused);
+ trainer.classList.toggle("arena-hud-mode",arenaHudMode);
+ trainer.classList.toggle("mechanic-challenge",S.challengeMode&&S.challengeType==="mechanic");
  $("trackingRoundProgress")?.classList.toggle("hidden",!trackingFocused);
  $("dualFocusLabel")?.classList.toggle("hidden",!stickFocused);
 }
@@ -364,6 +380,10 @@ function difficultyName(level){
  return["Easy","Controlled","Standard","Hard","Extreme"][level-1]||"Standard";
 }
 
+function defaultSequenceLengthForDifficulty(level){
+ return ({1:1,2:2,3:3,4:4,5:4})[level]||3;
+}
+
 function applyDifficulty(level,updateControls=true){
  level=Math.max(1,Math.min(5,+level||3));
  $("trainingDifficulty").value=String(level);
@@ -373,14 +393,15 @@ function applyDifficulty(level,updateControls=true){
  if(!updateControls)return;
 
  const profiles={
-  1:{pressure:3800,speed:"0.45",size:"0.20",angle:25,distance:25,hold:150},
-  2:{pressure:3000,speed:"0.45",size:"0.20",angle:22,distance:22,hold:125},
-  3:{pressure:2200,speed:"0.75",size:"0.14",angle:18,distance:18,hold:100},
-  4:{pressure:1650,speed:"1.10",size:"0.09",angle:14,distance:14,hold:75},
-  5:{pressure:1150,speed:"1.45",size:"0.09",angle:10,distance:10,hold:50}
+  1:{pressure:3800,speed:"0.45",size:"0.20",angle:25,distance:25,hold:150,sequenceLength:1},
+  2:{pressure:3000,speed:"0.45",size:"0.20",angle:22,distance:22,hold:125,sequenceLength:2},
+  3:{pressure:2200,speed:"0.75",size:"0.14",angle:18,distance:18,hold:100,sequenceLength:3},
+  4:{pressure:1650,speed:"1.10",size:"0.09",angle:14,distance:14,hold:75,sequenceLength:4},
+  5:{pressure:1400,speed:"1.45",size:"0.09",angle:10,distance:10,hold:50,sequenceLength:4}
  };
  const profile=profiles[level];
  $("timeSlider").value=profile.pressure;
+ $("sequenceLength").value=String(profile.sequenceLength||defaultSequenceLengthForDifficulty(level));
  $("trackingSpeed").value=profile.speed;
  $("trackingTargetSize").value=profile.size;
  $("angleTolerance").value=profile.angle;
@@ -390,6 +411,7 @@ function applyDifficulty(level,updateControls=true){
  $("distanceToleranceValue").textContent=profile.distance;
  $("holdDurationValue").textContent=profile.hold;
  updateUI();
+ saveV8Settings();
 
  if(S.running)newRound();
 }
@@ -506,6 +528,119 @@ function effectiveLimit(){
  if(rate<=.45)return Math.min(6000,v*1.12);
  return v;
 }
+
+const SCORE_DIFFICULTY_MULTIPLIER={1:1,2:1.1,3:1.2,4:1.35,5:1.5};
+const TRACKING_SCORE_INTERVAL_MS=400;
+
+function clampNumber(value,min,max){
+ return Math.max(min,Math.min(max,value));
+}
+
+function formatWholeNumber(value){
+ return Math.round(value).toLocaleString("en-US");
+}
+
+function sessionDifficultyMultiplier(){
+ const level=Math.max(1,Math.min(5,+$("trainingDifficulty")?.value||3));
+ return SCORE_DIFFICULTY_MULTIPLIER[level]||1.2;
+}
+
+function scoreTimeWindow(){
+ if(S.deadline===Infinity)return Math.max(900,baseLimit());
+ return Math.max(900,S.roundLimit||baseLimit());
+}
+
+function currentTrackingQuality(){
+ const elapsed=Math.max(1,performance.now()-S.trackingStart);
+ if(S.mode==="gamescenario"||S.mode==="strafeaim"){
+  const movementRatio=S.scenarioLeftOnMs/elapsed;
+  const aimRatio=S.scenarioRightOnMs/elapsed;
+  return clampNumber(movementRatio*.3+aimRatio*.7,.65,1.1);
+ }
+ return clampNumber(S.trackingOnTargetMs/elapsed,.65,1.08);
+}
+
+function updateScoreDisplay(){
+ const live=$("liveScore");
+ const report=$("reportScore");
+ if(live)live.textContent=formatWholeNumber(S.sessionScore);
+ if(report)report.textContent=formatWholeNumber(S.sessionScore);
+}
+
+function resetSessionScore(){
+ S.sessionScore=0;
+ S.trackingScoreRemainderMs=0;
+ S.scoreFinalized=false;
+ updateScoreDisplay();
+}
+
+function finalizeSessionScore(){
+ if(S.scoreFinalized)return;
+ S.scoreFinalized=true;
+}
+
+function addScoreEvent(basePoints,quality=1,options={}){
+ if(!S.running||S.paused||S.scoreFinalized||basePoints<=0)return 0;
+ const scaledQuality=clampNumber(quality,.7,1.15);
+ let speedBonus=0;
+ if(Number.isFinite(options.elapsedMs)&&Number.isFinite(options.windowMs)&&options.windowMs>0){
+  const pace=clampNumber(1-options.elapsedMs/options.windowMs,0,1);
+  speedBonus=pace*.2;
+ }
+ const streakBonus=Math.min(.1,Math.max(0,S.currentCombo-1)*.02);
+ const total=basePoints*sessionDifficultyMultiplier()*scaledQuality*(1+speedBonus+streakBonus);
+ const points=Math.max(0,Math.round(total));
+ if(!points)return 0;
+ S.sessionScore+=points;
+ updateScoreDisplay();
+ return points;
+}
+
+function awardTrackingScore(validOnTargetMs){
+ if(validOnTargetMs<=0)return;
+ S.trackingScoreRemainderMs+=validOnTargetMs;
+ const basePoints=S.mode==="gamescenario"?7:S.mode==="strafeaim"?6:6;
+ while(S.trackingScoreRemainderMs>=TRACKING_SCORE_INTERVAL_MS){
+  S.trackingScoreRemainderMs-=TRACKING_SCORE_INTERVAL_MS;
+  addScoreEvent(basePoints,currentTrackingQuality());
+ }
+}
+
+function awardButtonInputScore(elapsedMs){
+ addScoreEvent(8,1,{elapsedMs,windowMs:scoreTimeWindow()});
+}
+
+function awardCompletionScore(mode,elapsedMs){
+ const sequenceSize=Math.max(1,S.full.length||S.seq.length||1);
+ const windowMs=scoreTimeWindow();
+ if(mode==="simultaneous"){
+  addScoreEvent(44,1,{elapsedMs,windowMs});
+  return;
+ }
+ if(["sequence","transition","apex","endurance"].includes(mode)){
+  addScoreEvent(22+sequenceSize*8,1,{elapsedMs,windowMs});
+  return;
+ }
+ if(mode==="sticks"){
+  addScoreEvent(32,1,{elapsedMs,windowMs});
+  return;
+ }
+ if(mode==="dualsticks"){
+  addScoreEvent(52,1,{elapsedMs,windowMs});
+  return;
+ }
+ if(mode==="strafeaim"){
+  addScoreEvent(40,currentTrackingQuality(),{elapsedMs,windowMs});
+ }
+}
+
+function formatOnTargetReport(){
+ if(!S.sessionTrackingElapsedMs)return "—";
+ const seconds=(S.sessionTrackingOnTargetMs/1000).toFixed(1);
+ const percent=Math.round(S.sessionTrackingOnTargetMs/Math.max(1,S.sessionTrackingElapsedMs)*100);
+ return `${seconds}s · ${percent}%`;
+}
+
 function weights(){
  let key=S.preset==="adaptive"?"balanced":S.preset;
  let w={...(PRESETS[key]||PRESETS.balanced)};
@@ -671,11 +806,12 @@ const MODE_HINTS={
 const CHALLENGE_TYPE_DEFS={
  full:{label:"Full Challenge",summary:["Mixed buttons, sticks, tracking, and combat concepts.","Auto-rotates through the full pool."],categories:["button","stick","combat"]},
  combat:{label:"Combat Challenge",summary:["Weapon styles and transferable stick-control concepts.","Rotates through the combat concept set."],categories:["combat"]},
+ mechanic:{label:"Mechanic Challenge",summary:["Every enabled continuous Combat mechanic.","Time-based tracking with no contact completion."],categories:["combat"]},
  stick:{label:"Stick Challenge",summary:["Stick placement, tension, tracking, and coordinated movement.","Pairs single-stick and dual-stick work."],categories:["stick"]},
  button:{label:"Button Challenge",summary:["Sequences, simultaneous inputs, timing, and release control.","Focuses on button-only execution."],categories:["button"]}
 };
 
-function challengeTypeKey(type){
+function challengeTypeKey(type=S.challengeType){
  return CHALLENGE_TYPE_DEFS[type]?type:"full";
 }
 
@@ -684,6 +820,11 @@ function challengeTypeMeta(type=S.challengeType){
 }
 
 function challengeEntriesForType(type=S.challengeType){
+ if(challengeTypeKey(type)==="mechanic"){
+  return COMBAT_SCENARIOS
+   .filter(entry=>getCombatMechanicById(entry.mechanics?.[0]||entry.id).behavior==="continuous")
+   .map(entry=>entry.id);
+ }
  const meta=challengeTypeMeta(type);
  return CHALLENGE_MODE_POOL.filter(entry=>meta.categories.includes(challengeEntryCategory(entry)));
 }
@@ -695,7 +836,7 @@ function challengeStageFocusFallback(){
 function challengeFocusTargetForFamily(family){
  if(family==="buttons")return document.querySelector("#trainerPanel .controller-and-stick")||challengeStageFocusFallback();
  if(family==="sticks")return document.querySelector("#trainerPanel .controller-and-stick")||challengeStageFocusFallback();
- if(family==="tracking"||family==="combat")return document.querySelector("#stickTargets .shared-arena-shell")||challengeStageFocusFallback();
+ if(family==="tracking"||family==="combat")return $("stickTargets")||challengeStageFocusFallback();
  return challengeStageFocusFallback();
 }
 
@@ -713,23 +854,38 @@ function challengeFocusGroupForEntry(entry=S.challengeCurrentMode||S.mode){
 }
 
 function resetChallengeSnapState(){
- S.challengeFocusSnapToken++;
+ cancelPendingChallengeFocusSnap();
  S.challengePreviousFocusFamily=null;
  S.challengeCurrentFocusFamily=null;
  S.challengeFirstScenarioSnapPending=true;
+}
+
+function challengeRenderedFocusRect(target){
+ if(target?.id!=="stickTargets")return target?.getBoundingClientRect()||null;
+ const gameplayContainer=target.querySelector(".shared-arena-shell");
+ return gameplayContainer?.getBoundingClientRect()||target.getBoundingClientRect();
+}
+
+function cancelPendingChallengeFocusSnap(){
+ if(S.challengeSnapFrame){
+  cancelAnimationFrame(S.challengeSnapFrame);
+  S.challengeSnapFrame=0;
+ }
+ S.challengeFocusSnapToken++;
+ S.challengePendingSnapFamily=null;
 }
 
 function focusChallengeScenario(target,snapToken){
  if(!target||snapToken!==S.challengeFocusSnapToken)return;
  if(!S.challengeMode||!S.running||S.challengeSessionFinalized)return;
  if(!$('summaryModal')?.classList.contains('hidden'))return;
- const rect=target.getBoundingClientRect();
+ const rect=challengeRenderedFocusRect(target);
  const viewportHeight=window.innerHeight||document.documentElement.clientHeight||0;
- if(!viewportHeight||rect.height<=0)return;
- const desiredTop=Math.max(72,Math.round(viewportHeight*0.18));
- const currentTop=window.scrollY+rect.top;
- const nextTop=Math.max(0,currentTop-desiredTop);
- window.scrollTo({top:nextTop,left:window.scrollX,behavior:"auto"});
+ if(!rect||!viewportHeight||rect.height<=0)return;
+ const renderedCenter=window.scrollY+rect.top+rect.height/2;
+ const nextTop=Math.max(0,renderedCenter-viewportHeight/2);
+ const reducedMotion=window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+ window.scrollTo({top:nextTop,left:window.scrollX,behavior:reducedMotion?"auto":"smooth"});
 }
 
 function queueChallengeFocusSnap(nextEntry=S.challengeCurrentMode||S.mode){
@@ -745,12 +901,22 @@ function queueChallengeFocusSnap(nextEntry=S.challengeCurrentMode||S.mode){
  S.challengePreviousFocusFamily=previousFamily;
  S.challengeCurrentFocusFamily=nextFamily;
  if(!shouldSnap)return;
- const snapToken=++S.challengeFocusSnapToken;
- requestAnimationFrame(()=>requestAnimationFrame(()=>focusChallengeScenario(target,snapToken)));
+ if(S.challengePendingSnapFamily===nextFamily&&S.challengeSnapFrame)return;
+ cancelPendingChallengeFocusSnap();
+ S.challengePendingSnapFamily=nextFamily;
+ const snapToken=S.challengeFocusSnapToken;
+ S.challengeSnapFrame=requestAnimationFrame(()=>{
+  S.challengeSnapFrame=requestAnimationFrame(()=>{
+   S.challengeSnapFrame=0;
+   S.challengePendingSnapFamily=null;
+   focusChallengeScenario(target,snapToken);
+  });
+ });
 }
 
 function combatEntryWeight(entry){
- return COMBAT_WEAPON_STYLE_WEIGHTS[challengeEntryMeta(entry)?.weaponStyle]||1;
+ const meta=challengeEntryMeta(entry);
+ return getCombatMechanicById(meta.mechanicId).weight||1;
 }
 
 function weightedCombatPick(candidates){
@@ -792,20 +958,67 @@ function setChallengeType(type,options={}){
 }
 
 const COMBAT_SCENARIOS=[
- {id:"mirror",label:"AR — Mirror",weaponStyle:"AR",conceptName:"Mirror",description:"Match the movement relationship while keeping controlled stick tension.",mode:"gamescenario",profile:"mirror"},
- {id:"antiMirror",label:"LMG — Anti-Mirror",weaponStyle:"LMG",conceptName:"Anti-Mirror",description:"Counter the movement relationship with deliberate opposite aim pressure.",mode:"gamescenario",profile:"antiMirror"},
- {id:"oppositePush",label:"SMG — Opposite Push",weaponStyle:"SMG",conceptName:"Opposite Push",description:"Push the movement and aim sticks against each other.",mode:"gamescenario",profile:"oppositePush"},
- {id:"sameSidePush",label:"Shotgun — Same-Side Push",weaponStyle:"Shotgun",conceptName:"Same-Side Push",description:"Keep both sticks applying pressure in a related direction.",mode:"gamescenario",profile:"sameSidePush"},
- {id:"microCorrections",label:"Pistol — Micro Corrections",weaponStyle:"Pistol",conceptName:"Micro Corrections",description:"Use small right-stick adjustments while maintaining stable movement.",mode:"gamescenario",profile:"microCorrections"},
- {id:"wideCorrections",label:"LMG — Wide Corrections",weaponStyle:"LMG",conceptName:"Wide Corrections",description:"Use larger right-stick travel and broader target movement.",mode:"gamescenario",profile:"wideCorrections"},
- {id:"centerHold",label:"Marksman — Center Hold",weaponStyle:"Marksman",conceptName:"Center Hold",description:"Maintain stable tension near a central position.",mode:"gamescenario",profile:"centerHold"},
- {id:"pressureHold",label:"AR — Pressure Hold",weaponStyle:"AR",conceptName:"Pressure Hold",description:"Maintain sustained off-center stick tension without drifting.",mode:"gamescenario",profile:"pressureHold"},
- {id:"lead",label:"Sniper — Lead",weaponStyle:"Sniper",conceptName:"Lead",description:"Aim slightly ahead of the target's movement path.",mode:"gamescenario",profile:"lead"},
- {id:"follow",label:"Pistol — Follow",weaponStyle:"Pistol",conceptName:"Follow",description:"Let the aim follow the target's current path smoothly.",mode:"gamescenario",profile:"follow"}
+ {id:"mirror",label:"Mirror",weaponStyle:"",conceptName:"Mirror",description:"Aim broadly supports movement without copying it exactly.",mode:"gamescenario",profile:"mirror",mechanics:["mirror"]},
+ {id:"antiMirror",label:"Anti-Mirror",weaponStyle:"",conceptName:"Anti-Mirror",description:"Aim broadly counters movement while keeping both roles separate.",mode:"gamescenario",profile:"antiMirror",mechanics:["antiMirror"]},
+ {id:"counterPressure",label:"Counter Pressure",weaponStyle:"",conceptName:"Counter Pressure",description:"Movement commits one way while aim applies controlled opposing pressure.",mode:"gamescenario",profile:"oppositePush",mechanics:["counterPressure"]},
+ {id:"microCorrections",label:"Micro Corrections",weaponStyle:"",conceptName:"Micro Corrections",description:"Maintain readable movement while making tiny aim changes.",mode:"gamescenario",profile:"microCorrections",mechanics:["microCorrections"]},
+ {id:"pressureHold",label:"Pressure Hold",weaponStyle:"",conceptName:"Pressure Hold",description:"Hold deliberate off-center pressure with both sticks.",mode:"gamescenario",profile:"pressureHold",mechanics:["pressureHold"]},
+ {id:"unequalPressure",label:"Unequal Pressure",weaponStyle:"",conceptName:"Unequal Pressure",description:"Both sticks hold different deliberate pressure levels.",mode:"gamescenario",profile:"sameSidePush",mechanics:["unequalPressure"]},
+ {id:"independentHold",label:"Independent Hold",weaponStyle:"",conceptName:"Independent Hold",description:"Keep one path calm while tracking a more active independent path.",mode:"gamescenario",profile:"independentHold",mechanics:["independentHold"]},
+ {id:"strafeSwitch",label:"Strafe Switch",weaponStyle:"",conceptName:"Strafe Switch",description:"Track readable movement reversals while keeping aim smooth.",mode:"gamescenario",profile:"strafeSwitch",mechanics:["strafeSwitch"]},
+ {id:"lead",label:"Lead",weaponStyle:"",conceptName:"Lead",description:"Right-stick aim leads the implied movement path.",mode:"gamescenario",profile:"lead",mechanics:["lead"]},
+ {id:"follow",label:"Follow",weaponStyle:"",conceptName:"Follow",description:"Right-stick aim follows smoothly without overreacting.",mode:"gamescenario",profile:"follow",mechanics:["follow"]},
+ {id:"stableAim",label:"Stable Aim",weaponStyle:"",conceptName:"Stable Aim",description:"Aim remains steady while movement changes.",mode:"gamescenario",profile:"centerHold",mechanics:["stableAim"]},
+ {id:"stableMovement",label:"Stable Movement",weaponStyle:"",conceptName:"Stable Movement",description:"Movement remains steady while aim changes.",mode:"gamescenario",profile:"wideCorrections",mechanics:["stableMovement"]},
+ {id:"pressureUnderMotion",label:"Pressure Under Motion",weaponStyle:"",conceptName:"Pressure Under Motion",description:"Change movement direction while maintaining calm off-center aim pressure.",mode:"gamescenario",profile:"pressureUnderMotion",mechanics:["pressureUnderMotion"]},
+ {id:"pressureUnderAim",label:"Pressure Under Aim",weaponStyle:"",conceptName:"Pressure Under Aim",description:"Maintain off-center movement pressure while aim changes direction.",mode:"gamescenario",profile:"pressureUnderAim",mechanics:["pressureUnderAim"]},
+ {id:"controlledEntry",label:"Controlled Entry",weaponStyle:"",conceptName:"Controlled Entry",description:"Accelerate smoothly into both active tracking paths.",mode:"gamescenario",profile:"controlledEntry",mechanics:["controlledEntry"]},
+ {id:"controlledExit",label:"Controlled Exit",weaponStyle:"",conceptName:"Controlled Exit",description:"Decelerate smoothly before each readable direction change.",mode:"gamescenario",profile:"controlledExit",mechanics:["controlledExit"]},
+ {id:"settle",label:"Settle",weaponStyle:"",conceptName:"Settle",description:"Reduce speed near path endpoints and land each correction softly.",mode:"gamescenario",profile:"settle",mechanics:["settle"]},
+ {id:"thumbSeparation",label:"Thumb Separation",weaponStyle:"",conceptName:"Thumb Separation",description:"Track intentionally different directions, speeds, radii, and timing.",mode:"gamescenario",profile:"thumbSeparation",mechanics:["thumbSeparation"]},
+ {id:"recover",label:"Recover",weaponStyle:"",conceptName:"Recover",description:"Return to the intended tracking path after a controlled overshoot.",mode:"gamescenario",profile:"recover",mechanics:["recover"]},
+ {id:"commit",label:"Commit",weaponStyle:"",conceptName:"Commit",description:"Move confidently toward the required stick pressure instead of hesitating.",mode:"gamescenario",profile:"commit",mechanics:["commit"]},
+ {id:"pressureChange",label:"Pressure Change",weaponStyle:"",conceptName:"Pressure Change",description:"Transition between lighter and heavier stick pressure while maintaining tracking.",mode:"gamescenario",profile:"pressureChange",mechanics:["pressureChange"]},
+ {id:"pressureRelease",label:"Pressure Release",weaponStyle:"",conceptName:"Pressure Release",description:"Reduce stick pressure gradually without snapping toward center.",mode:"gamescenario",profile:"pressureRelease",mechanics:["pressureRelease"]},
+ {id:"pressureLadder",label:"Pressure Ladder",weaponStyle:"",conceptName:"Pressure Ladder",description:"Move through multiple controlled pressure levels during continuous tracking.",mode:"gamescenario",profile:"pressureLadder",mechanics:["pressureLadder"]},
+ {id:"arcTracking",label:"Arc Tracking",weaponStyle:"",conceptName:"Arc Tracking",description:"Track smooth curved motion instead of straight-line motion.",mode:"gamescenario",profile:"arcTracking",mechanics:["arcTracking"]},
+ {id:"angleHold",label:"Angle Hold",weaponStyle:"",conceptName:"Angle Hold",description:"Maintain one consistent movement angle while aiming responds naturally.",mode:"gamescenario",profile:"angleHold",mechanics:["angleHold"]},
+ {id:"movementPriority",label:"Movement Priority",weaponStyle:"",conceptName:"Movement Priority",description:"Movement drives the mechanic while aim adapts.",mode:"gamescenario",profile:"movementPriority",mechanics:["movementPriority"]},
+ {id:"aimPriority",label:"Aim Priority",weaponStyle:"",conceptName:"Aim Priority",description:"Aim drives the mechanic while movement adapts.",mode:"gamescenario",profile:"aimPriority",mechanics:["aimPriority"]},
+ {id:"independentTiming",label:"Independent Timing",weaponStyle:"",conceptName:"Independent Timing",description:"One thumb deliberately leads the other while both remain continuous.",mode:"gamescenario",profile:"independentTiming",mechanics:["independentTiming"]}
 ];
+const COMBAT_MECHANICS={
+ pressureHold:{id:"pressureHold",name:"Pressure Hold",coachingCue:"Keep both steady",family:"hold",behavior:"continuous",weight:3,motion:{relation:"same",leftSpeed:.3,rightSpeed:.22,response:1.9,turn:.16,changeMin:3200,changeMax:4400,offset:.04},left:{job:"stable movement",band:[.58,.72],diagonalChance:.06},right:{job:"stable aim pressure",band:[.3,.4],horizontal:{mode:"sameOrFree",followChance:.8,min:.06,max:.12},vertical:{profile:"neutralTight",jitterChance:0}}},
+ microCorrections:{id:"microCorrections",name:"Micro Corrections",coachingCue:"Small aim pressure",family:"precision",behavior:"continuous",weight:3,motion:{relation:"same",leftSpeed:.5,rightSpeed:.16,response:2.2,turn:.16,changeMin:2300,changeMax:3400,offset:-.04},left:{job:"readable movement",band:[.36,.5],diagonalChance:.05},right:{job:"tiny aim changes",band:[.1,.2],horizontal:{mode:"free",min:-.05,max:.05},vertical:{profile:"neutralTight",jitterChance:0}}},
+ counterPressure:{id:"counterPressure",name:"Counter Pressure",coachingCue:"Counter gently",family:"counter",behavior:"continuous",weight:3,motion:{relation:"counter",leftSpeed:.76,rightSpeed:.58,response:4.5,turn:.32,changeMin:1800,changeMax:2600},left:{job:"committed movement",band:[.56,.74],diagonalChance:.16},right:{job:"opposing aim pressure",band:[.24,.4],horizontal:{mode:"opposite",followChance:.9,min:.12,max:.24},vertical:{profile:"balanced",jitterChance:0}}},
+ mirror:{id:"mirror",name:"Mirror",coachingCue:"Match, don't copy",family:"follow",behavior:"continuous",weight:3,motion:{relation:"same",leftSpeed:.68,rightSpeed:.6,response:4.6,turn:.3,changeMin:2000,changeMax:2900,offset:0},left:{job:"clear movement",band:[.46,.68],diagonalChance:.12},right:{job:"supporting aim",band:[.26,.44],horizontal:{mode:"same",followChance:.9,min:.1,max:.2},vertical:{profile:"balanced",jitterChance:0}}},
+ antiMirror:{id:"antiMirror",name:"Anti-Mirror",coachingCue:"Separate the sticks",family:"counter",behavior:"continuous",weight:3,motion:{relation:"opposite",leftSpeed:.68,rightSpeed:.6,response:4.6,turn:.3,changeMin:2000,changeMax:2900,offset:0},left:{job:"clear movement",band:[.46,.68],diagonalChance:.12},right:{job:"countering aim",band:[.26,.44],horizontal:{mode:"opposite",followChance:.9,min:.1,max:.2},vertical:{profile:"balanced",jitterChance:0}}},
+ unequalPressure:{id:"unequalPressure",name:"Unequal Pressure",coachingCue:"Different pressure",family:"pressure",behavior:"continuous",weight:2,motion:{relation:"independent",leftSpeed:.32,rightSpeed:.38,response:2,turn:.18,changeMin:3000,changeMax:4300},left:{job:"stronger movement pressure",band:[.64,.78],diagonalChance:.06},right:{job:"different aim pressure",band:[.14,.25],horizontal:{mode:"free",min:-.1,max:.1},vertical:{profile:"neutralTight",jitterChance:0}}},
+ independentHold:{id:"independentHold",name:"Independent Hold",coachingCue:"Hold one, move one",family:"stability",behavior:"continuous",weight:3,motion:{relation:"independent",leftSpeed:.1,rightSpeed:.72,response:2.6,turn:.38,changeMin:2600,changeMax:3800,alternateRoles:true},left:{job:"narrow stable path",band:[.46,.52],diagonalChance:.04},right:{job:"active independent aim",band:[.2,.38],horizontal:{mode:"free",min:-.16,max:.16},vertical:{profile:"balanced",jitterChance:0}}},
+ strafeSwitch:{id:"strafeSwitch",name:"Strafe Switch",coachingCue:"Read the reversal",family:"timing",behavior:"continuous",weight:2,motion:{relation:"same",leftSpeed:.72,rightSpeed:.55,response:3.2,turn:.08,changeMin:1700,changeMax:2400,reverse:true,offset:.06},left:{job:"readable reversals",band:[.46,.68],diagonalChance:.03},right:{job:"smooth aim path",band:[.2,.36],horizontal:{mode:"same",followChance:.86,min:.08,max:.16},vertical:{profile:"neutralTight",jitterChance:0}}},
+ lead:{id:"lead",name:"Lead",coachingCue:"Aim slightly ahead",family:"timing",behavior:"continuous",weight:2,motion:{relation:"lead",path:"relationship",cycleMs:6400,phaseOffset:.14,arcSpan:.82,pathResponse:4.5,pathEntryMs:1000,leftSpeed:.64,rightSpeed:.6,response:3.2,turn:.3,changeMin:2400,changeMax:3300},left:{job:"movement path",band:[.44,.66],diagonalChance:.08},right:{job:"leading aim",band:[.22,.4],horizontal:{mode:"same",followChance:.9,min:.1,max:.18},vertical:{profile:"balanced",jitterChance:0}}},
+ follow:{id:"follow",name:"Follow",coachingCue:"Track, don’t chase",family:"timing",behavior:"continuous",weight:2,motion:{relation:"same",path:"relationship",cycleMs:6400,phaseOffset:-.16,arcSpan:.82,pathResponse:3.8,pathEntryMs:1100,leftSpeed:.64,rightSpeed:.5,response:2.6,turn:.3,changeMin:2400,changeMax:3300},left:{job:"movement path",band:[.44,.66],diagonalChance:.08},right:{job:"following aim",band:[.22,.4],horizontal:{mode:"same",followChance:.9,min:.08,max:.16},vertical:{profile:"balanced",jitterChance:0}}},
+ stableAim:{id:"stableAim",name:"Stable Aim",coachingCue:"Keep aim calm",family:"stability",behavior:"continuous",weight:2,motion:{relation:"independent",leftSpeed:.72,rightSpeed:.08,response:1.7,turn:.24,changeMin:2800,changeMax:4200},left:{job:"active movement",band:[.44,.66],diagonalChance:.08},right:{job:"hold aim steady",band:[.2,.25],horizontal:{mode:"free",min:-.04,max:.04},vertical:{profile:"neutralTight",jitterChance:0}}},
+ stableMovement:{id:"stableMovement",name:"Stable Movement",coachingCue:"Keep movement calm",family:"stability",behavior:"continuous",weight:2,motion:{relation:"independent",leftSpeed:.08,rightSpeed:.74,response:2.6,turn:.42,changeMin:2200,changeMax:3300},left:{job:"stable movement",band:[.38,.46],diagonalChance:.04},right:{job:"active aim",band:[.2,.38],horizontal:{mode:"free",min:-.16,max:.16},vertical:{profile:"balanced",jitterChance:0}}},
+ pressureUnderMotion:{id:"pressureUnderMotion",name:"Pressure Under Motion",coachingCue:"Hold aim pressure",family:"pressure",behavior:"continuous",weight:2,motion:{relation:"independent",leftSpeed:.8,rightSpeed:.08,response:2.1,turn:.55,changeMin:1700,changeMax:2400},left:{job:"changing movement",band:[.4,.68],diagonalChance:.14},right:{job:"stable off-center aim",band:[.48,.56],horizontal:{mode:"free",min:-.06,max:.06},vertical:{profile:"neutralTight",jitterChance:0}}},
+ pressureUnderAim:{id:"pressureUnderAim",name:"Pressure Under Aim",coachingCue:"Hold movement pressure",family:"pressure",behavior:"continuous",weight:2,motion:{relation:"independent",leftSpeed:.08,rightSpeed:.8,response:2.6,turn:.55,changeMin:1700,changeMax:2400},left:{job:"stable off-center movement",band:[.62,.72],diagonalChance:.03},right:{job:"changing aim",band:[.2,.44],horizontal:{mode:"free",min:-.18,max:.18},vertical:{profile:"balanced",jitterChance:0}}},
+ controlledEntry:{id:"controlledEntry",name:"Controlled Entry",coachingCue:"Enter smoothly",family:"control",behavior:"continuous",weight:2,motion:{relation:"independent",leftSpeed:.68,rightSpeed:.58,response:2.6,turn:.32,changeMin:2400,changeMax:3400,entryMs:2200,entryFloor:.06},left:{job:"smooth movement entry",band:[.38,.62],diagonalChance:.08},right:{job:"smooth aim entry",band:[.2,.38],horizontal:{mode:"free",min:-.14,max:.14},vertical:{profile:"balanced",jitterChance:0}}},
+ controlledExit:{id:"controlledExit",name:"Controlled Exit",coachingCue:"Exit smoothly",family:"control",behavior:"continuous",weight:2,motion:{relation:"independent",leftSpeed:.7,rightSpeed:.6,response:2.8,turn:.45,changeMin:2100,changeMax:3000,decelerateMs:1100,decelerateFloor:.1},left:{job:"controlled movement exit",band:[.4,.64],diagonalChance:.08},right:{job:"controlled aim exit",band:[.2,.38],horizontal:{mode:"free",min:-.14,max:.14},vertical:{profile:"balanced",jitterChance:0}}},
+ settle:{id:"settle",name:"Settle",coachingCue:"Land softly",family:"control",behavior:"continuous",weight:2,motion:{relation:"independent",leftSpeed:.65,rightSpeed:.55,response:2.4,turn:.36,changeMin:2400,changeMax:3400,settleZone:.45,settleFloor:.08},left:{job:"soft movement landing",band:[.36,.64],diagonalChance:.08},right:{job:"soft aim landing",band:[.18,.4],horizontal:{mode:"free",min:-.14,max:.14},vertical:{profile:"balanced",jitterChance:0}}},
+ thumbSeparation:{id:"thumbSeparation",name:"Thumb Separation",coachingCue:"Separate the sticks",family:"separation",behavior:"continuous",weight:2,motion:{relation:"independent",leftSpeed:.78,rightSpeed:.3,response:2.8,turn:.65,changeMin:1700,changeMax:2400,rightChangeScale:1.8},left:{job:"wide movement path",band:[.55,.74],diagonalChance:.18},right:{job:"separate aim path",band:[.16,.3],horizontal:{mode:"free",min:-.14,max:.14},vertical:{profile:"balanced",jitterChance:0}}},
+ recover:{id:"recover",name:"Recover",coachingCue:"Recover smoothly",family:"recovery",behavior:"continuous",weight:2,motion:{relation:"independent",path:"recover",cycleMs:4600,overshoot:.28,recoverAt:.48,pathResponse:5,pathEntryMs:900,leftSpeed:.68,rightSpeed:.58,response:3,turn:.38,changeMin:2400,changeMax:3300},left:{job:"recover movement path",band:[.4,.64],diagonalChance:.08},right:{job:"recover aim path",band:[.2,.38],horizontal:{mode:"free",min:-.14,max:.14},vertical:{profile:"balanced",jitterChance:0}}},
+ commit:{id:"commit",name:"Commit",coachingCue:"Commit",family:"pressure",behavior:"continuous",weight:2,motion:{relation:"independent",path:"pressure",pressurePattern:"commit",cycleMs:4400,pathResponse:5.5,pathEntryMs:900,leftSpeed:.7,rightSpeed:.6,response:3.2,turn:.24,changeMin:2400,changeMax:3300},left:{job:"confident movement pressure",band:[.28,.7],diagonalChance:.05},right:{job:"confident aim pressure",band:[.14,.4],horizontal:{mode:"free",min:-.12,max:.12},vertical:{profile:"neutralTight",jitterChance:0}}},
+ pressureChange:{id:"pressureChange",name:"Pressure Change",coachingCue:"Change pressure",family:"pressure",behavior:"continuous",weight:2,motion:{relation:"independent",path:"pressure",pressurePattern:"wave",cycleMs:4600,pathResponse:5,pathEntryMs:900,leftSpeed:.58,rightSpeed:.5,response:2.8,turn:.22,changeMin:2600,changeMax:3500},left:{job:"changing movement pressure",band:[.3,.7],diagonalChance:.06},right:{job:"changing aim pressure",band:[.16,.4],horizontal:{mode:"free",min:-.12,max:.12},vertical:{profile:"balanced",jitterChance:0}}},
+ pressureRelease:{id:"pressureRelease",name:"Pressure Release",coachingCue:"Release smoothly",family:"release",behavior:"continuous",weight:2,motion:{relation:"independent",path:"pressure",pressurePattern:"release",cycleMs:5600,pathResponse:4.8,pathEntryMs:900,leftSpeed:.54,rightSpeed:.46,response:2.6,turn:.2,changeMin:2800,changeMax:3800},left:{job:"gradual movement release",band:[.28,.7],diagonalChance:.05},right:{job:"gradual aim release",band:[.14,.4],horizontal:{mode:"free",min:-.12,max:.12},vertical:{profile:"neutralTight",jitterChance:0}}},
+ pressureLadder:{id:"pressureLadder",name:"Pressure Ladder",coachingCue:"Climb pressure",family:"ladder",behavior:"continuous",weight:2,motion:{relation:"independent",path:"pressure",pressurePattern:"ladder",cycleMs:6000,pathResponse:5,pathEntryMs:900,leftSpeed:.56,rightSpeed:.48,response:2.8,turn:.18,changeMin:3000,changeMax:4000},left:{job:"movement pressure levels",band:[.28,.72],diagonalChance:.05},right:{job:"aim pressure levels",band:[.14,.42],horizontal:{mode:"free",min:-.12,max:.12},vertical:{profile:"neutralTight",jitterChance:0}}},
+ arcTracking:{id:"arcTracking",name:"Arc Tracking",coachingCue:"Follow the curve",family:"curve",behavior:"continuous",weight:2,motion:{relation:"independent",path:"arc",cycleMs:7200,arcSpan:1.25,pathResponse:5,pathEntryMs:1000,leftSpeed:.62,rightSpeed:.54,response:2.8,turn:.3,changeMin:2800,changeMax:3800},left:{job:"smooth movement arc",band:[.48,.68],diagonalChance:.12},right:{job:"smooth aim arc",band:[.22,.4],horizontal:{mode:"free",min:-.14,max:.14},vertical:{profile:"balanced",jitterChance:0}}},
+ angleHold:{id:"angleHold",name:"Angle Hold",coachingCue:"Hold the angle",family:"angle",behavior:"continuous",weight:2,motion:{relation:"same",path:"angleHold",cycleMs:4600,pathResponse:5,pathEntryMs:900,leftSpeed:.54,rightSpeed:.46,response:3,turn:.12,changeMin:3000,changeMax:4100},left:{job:"fixed movement angle",band:[.34,.68],diagonalChance:.28},right:{job:"natural aim response",band:[.18,.38],horizontal:{mode:"same",followChance:.86,min:.07,max:.15},vertical:{profile:"balanced",jitterChance:0}}},
+ movementPriority:{id:"movementPriority",name:"Movement Priority",coachingCue:"Move first",family:"priority",behavior:"continuous",weight:2,motion:{relation:"same",priority:"left",cycleMs:5200,pathResponse:5,pathEntryMs:1000,leftSpeed:.82,rightSpeed:.38,response:2.2,turn:.6,changeMin:1800,changeMax:2600,offset:.08},left:{job:"driving movement",band:[.48,.7],diagonalChance:.14},right:{job:"adapting aim",band:[.18,.34],horizontal:{mode:"same",followChance:.84,min:.07,max:.14},vertical:{profile:"balanced",jitterChance:0}}},
+ aimPriority:{id:"aimPriority",name:"Aim Priority",coachingCue:"Aim first",family:"priority",behavior:"continuous",weight:2,motion:{relation:"same",priority:"right",cycleMs:5200,pathResponse:5,pathEntryMs:1000,leftSpeed:.38,rightSpeed:.82,response:2.2,turn:.6,changeMin:1800,changeMax:2600,offset:-.08},left:{job:"adapting movement",band:[.38,.58],diagonalChance:.1},right:{job:"driving aim",band:[.24,.44],horizontal:{mode:"free",min:-.16,max:.16},vertical:{profile:"balanced",jitterChance:0}}},
+ independentTiming:{id:"independentTiming",name:"Independent Timing",coachingCue:"One then the other",family:"timing",behavior:"continuous",weight:2,motion:{relation:"independent",path:"timing",cycleMs:6800,leadFraction:.18,pathResponse:5,pathEntryMs:1200,leftSpeed:.62,rightSpeed:.62,response:2.8,turn:.38,changeMin:2600,changeMax:3600,alternateRoles:true},left:{job:"leading movement timing",band:[.42,.66],diagonalChance:.12},right:{job:"following aim timing",band:[.2,.4],horizontal:{mode:"free",min:-.14,max:.14},vertical:{profile:"balanced",jitterChance:0}}}
+};
 const COMBAT_SCENARIO_BY_ID=Object.fromEntries(COMBAT_SCENARIOS.map(entry=>[entry.id,entry]));
-const COMBAT_WEAPON_STYLE_WEIGHTS={SMG:5,AR:5,Pistol:4,Shotgun:3,Marksman:2,LMG:1,Sniper:1};
-const COMBAT_SCENARIO_ALIASES={smg:"pressureHold",shotgun:"sameSidePush",micro:"microCorrections",reset:"centerHold",mixed:"mixed"};
+const COMBAT_SCENARIO_ALIASES={smg:"pressureHold",shotgun:"stableMovement",micro:"microCorrections",reset:"stableAim",mixed:"mixed"};
 
 function resolveCombatScenarioId(value){
  return COMBAT_SCENARIO_ALIASES[value]||value||"mixed";
@@ -839,6 +1052,208 @@ function updateCombatPracticeDescription(){
  description.textContent=entry?.description||"";
 }
 
+function getCombatMechanicById(id){
+ return COMBAT_MECHANICS[id]||COMBAT_MECHANICS.follow;
+}
+
+function activeCombatMechanic(){
+ const scenarioId=S.scenarioName||S.challengeScenarioPreset||($('gameScenarioType')?.value);
+ const entry=getCombatScenarioEntry(scenarioId);
+ return getCombatMechanicById(S.currentCombatMechanicId||entry?.mechanics?.[0]||entry?.id);
+}
+
+function isContinuousCombatMechanic(){
+ return activeCombatMechanic().behavior==="continuous";
+}
+
+function beginMechanicTrace(now){
+ if(!DEBUG||!S.challengeMode||S.challengeType!=="mechanic")return;
+ const motionInitialized=Math.hypot(S.scenarioLeft.vx,S.scenarioLeft.vy)>0&&Math.hypot(S.scenarioRight.vx,S.scenarioRight.vy)>0;
+ S.mechanicTrace={
+  mechanic:S.currentCombatMechanicId,
+  enteredAt:now,
+  durationMs:Math.max(0,(S.challengeSwitchAt||now)-now),
+  motionInitialized,
+  stayedInsideBounds:true
+ };
+ console.debug("[Mechanic Challenge] mechanic entered",{...S.mechanicTrace});
+}
+
+function updateMechanicTraceBounds(left,right){
+ if(!S.mechanicTrace)return;
+ const positions=[left.x,left.y,right.x,right.y];
+ const inside=positions.every(Number.isFinite)&&Math.hypot(left.x,left.y)<=.9&&Math.hypot(right.x,right.y)<=.9;
+ S.mechanicTrace.stayedInsideBounds&&=inside;
+}
+
+function endMechanicTrace(reason){
+ if(!DEBUG||!S.mechanicTrace)return;
+ console.debug("[Mechanic Challenge] mechanic exited",{
+  ...S.mechanicTrace,
+  elapsedMs:Math.max(0,performance.now()-S.mechanicTrace.enteredAt),
+  reason
+ });
+ S.mechanicTrace=null;
+}
+
+function activeCombatMotion(mechanic=activeCombatMechanic()){
+ const motion=mechanic.motion;
+ if(!motion.alternateRoles||!S.combatRoleSwap)return motion;
+ return{...motion,leftSpeed:motion.rightSpeed,rightSpeed:motion.leftSpeed};
+}
+
+function combatBandForSide(mechanic,side){
+ if(mechanic.motion.alternateBands&&S.combatRoleSwap)return mechanic[side==="left"?"right":"left"].band;
+ return mechanic[side].band;
+}
+
+function combatMotionSpeedScale(body,band,motion,now){
+ let scale=1;
+ if(motion.entryMs){
+  const entryProgress=clampNumber((now-S.scenarioMotionStartedAt)/motion.entryMs,0,1);
+  scale*=motion.entryFloor+(1-motion.entryFloor)*entryProgress;
+ }
+ if(motion.decelerateMs){
+  const turnProgress=clampNumber((body.nextChange-now)/motion.decelerateMs,0,1);
+  scale*=motion.decelerateFloor+(1-motion.decelerateFloor)*turnProgress;
+ }
+ if(motion.settleZone){
+  const distance=Math.hypot(body.x,body.y);
+  const span=Math.max(.01,band.max-band.min);
+  const endpointDistance=Math.max(0,Math.min(distance-band.min,band.max-distance));
+  const settleProgress=clampNumber(endpointDistance/(span*motion.settleZone),0,1);
+  scale*=motion.settleFloor+(1-motion.settleFloor)*settleProgress;
+ }
+ return scale;
+}
+
+function smoothCombatStep(value){
+ const clamped=clampNumber(value,0,1);
+ return clamped*clamped*(3-2*clamped);
+}
+
+function combatPressureProgress(pattern,phase){
+ if(pattern==="commit"){
+  if(phase<.25)return smoothCombatStep(phase/.25);
+  if(phase<.72)return 1;
+  return 1-smoothCombatStep((phase-.72)/.28);
+ }
+ if(pattern==="release"){
+  if(phase<.8)return 1-smoothCombatStep(phase/.8);
+  return smoothCombatStep((phase-.8)/.2);
+ }
+ if(pattern==="ladder"){
+  const levels=[0,.34,.67,1,.67,.34];
+  const position=phase*levels.length;
+  const index=Math.floor(position)%levels.length;
+  const previous=levels[(index+levels.length-1)%levels.length];
+  const local=position-index;
+  return local<.42?previous+(levels[index]-previous)*smoothCombatStep(local/.42):levels[index];
+ }
+ return .5-Math.cos(phase*Math.PI*2)*.5;
+}
+
+function combatPathRadius(band,progress){
+ return band.min+(band.max-band.min)*clampNumber(progress,0,1);
+}
+
+function combatPathPoint(angle,radius){
+ return{x:Math.cos(angle)*radius,y:Math.sin(angle)*radius};
+}
+
+function combatParameterizedTargets(mechanic,motion,now,leftBand,rightBand){
+ const path=motion.path;
+ if(!path&&!motion.priority)return{left:null,right:null};
+ const elapsed=Math.max(0,now-S.scenarioMotionStartedAt);
+ const cycleMs=Math.max(1200,motion.cycleMs||3600);
+ const phase=(elapsed%cycleMs)/cycleMs;
+ const leftAnchor=Math.atan2(S.scenarioLeft.targetY,S.scenarioLeft.targetX);
+ const rightAnchor=Math.atan2(S.scenarioRight.targetY,S.scenarioRight.targetX);
+ const withSmoothEntry=targets=>{
+  const progress=smoothCombatStep(elapsed/Math.max(1,motion.pathEntryMs||700));
+  const blend=(target,body,band)=>{
+   if(!target)return null;
+   const origin=clampCombatTargetToBand(body.targetX,body.targetY,band.min,band.max);
+   return{x:origin.x+(target.x-origin.x)*progress,y:origin.y+(target.y-origin.y)*progress};
+  };
+  return{
+   left:blend(targets.left,S.scenarioLeft,leftBand),
+   right:blend(targets.right,S.scenarioRight,rightBand)
+  };
+ };
+
+ if(path==="pressure"){
+  const pressure=combatPressureProgress(motion.pressurePattern,phase);
+  return withSmoothEntry({
+   left:combatPathPoint(leftAnchor,combatPathRadius(leftBand,pressure)),
+   right:combatPathPoint(rightAnchor,combatPathRadius(rightBand,pressure))
+  });
+ }
+ if(path==="arc"){
+  const sweep=Math.sin(phase*Math.PI*2)*(motion.arcSpan||1.4);
+  return withSmoothEntry({
+   left:combatPathPoint(leftAnchor+sweep,combatPathRadius(leftBand,.62)),
+   right:combatPathPoint(rightAnchor-sweep*.72,combatPathRadius(rightBand,.58))
+  });
+ }
+ if(path==="relationship"){
+  const span=motion.arcSpan||.8;
+  const leftSweep=Math.sin(phase*Math.PI*2)*span;
+  const rightSweep=Math.sin((phase+(motion.phaseOffset||0))*Math.PI*2)*span;
+  return withSmoothEntry({
+   left:combatPathPoint(leftAnchor+leftSweep,combatPathRadius(leftBand,.62)),
+   right:combatPathPoint(leftAnchor+rightSweep,combatPathRadius(rightBand,.58))
+  });
+ }
+ if(path==="angleHold"){
+  const pressure=.5-Math.cos(phase*Math.PI*2)*.5;
+  return withSmoothEntry({left:combatPathPoint(leftAnchor,combatPathRadius(leftBand,pressure)),right:null});
+ }
+ if(path==="recover"){
+  const cycleIndex=Math.floor(elapsed/cycleMs);
+  const direction=cycleIndex%2?-1:1;
+  const recoveryPhase=clampNumber(phase/(motion.recoverAt||.34),0,1);
+  const overshoot=phase<(motion.recoverAt||.34)?Math.sin(recoveryPhase*Math.PI)*(motion.overshoot||.3)*direction:0;
+  const drift=elapsed/cycleMs*.72;
+  return withSmoothEntry({
+   left:combatPathPoint(leftAnchor+drift+overshoot,combatPathRadius(leftBand,.62)),
+   right:combatPathPoint(rightAnchor+drift*.82+overshoot*.72,combatPathRadius(rightBand,.58))
+  });
+ }
+ if(path==="timing"){
+  const leftLeads=!S.combatRoleSwap;
+  const delay=motion.leadFraction||.22;
+  const leftPhase=phase-(leftLeads?0:delay);
+  const rightPhase=phase-(leftLeads?delay:0);
+  return withSmoothEntry({
+   left:combatPathPoint(leftAnchor+leftPhase*Math.PI*2,combatPathRadius(leftBand,.58)),
+   right:combatPathPoint(rightAnchor+rightPhase*Math.PI*2,combatPathRadius(rightBand,.58))
+  });
+ }
+ if(motion.priority){
+  const driverIsLeft=motion.priority==="left";
+  const driverAnchor=driverIsLeft?leftAnchor:rightAnchor;
+  const driverAngle=driverAnchor+Math.sin(phase*Math.PI*2)*1.05;
+  const followerAngle=driverAnchor+Math.sin((phase-.16)*Math.PI*2)*.48+(motion.offset||0);
+  return withSmoothEntry({
+   left:combatPathPoint(driverIsLeft?driverAngle:followerAngle,combatPathRadius(leftBand,driverIsLeft?.72:.52)),
+   right:combatPathPoint(driverIsLeft?followerAngle:driverAngle,combatPathRadius(rightBand,driverIsLeft?.52:.72))
+  });
+ }
+ return{left:null,right:null};
+}
+
+function advanceCombatPathBody(body,target,motion,dt){
+ const previousX=body.x,previousY=body.y;
+ const blend=Math.min(1,dt*(motion.pathResponse||motion.response||6));
+ body.x+=(target.x-body.x)*blend;
+ body.y+=(target.y-body.y)*blend;
+ if(dt>0){
+  body.vx=(body.x-previousX)/dt;
+  body.vy=(body.y-previousY)/dt;
+ }
+}
+
 function getCombatScenarioDescriptor(){
  if(S.mode==="strafeaim"){
   const style=($("aimTargetStyle")?.value)||"mixed";
@@ -857,15 +1272,151 @@ function getCombatScenarioDescriptor(){
  }
  if(S.mode==="gamescenario"){
   const entry=getCombatScenarioEntry(S.scenarioName||S.challengeScenarioPreset||($("gameScenarioType")?.value));
-  return entry?{weaponStyle:entry.weaponStyle,conceptName:entry.conceptName}:{weaponStyle:"AR",conceptName:"Follow"};
+  const mechanic=entry?getCombatMechanicById(entry.mechanics?.[0]):COMBAT_MECHANICS.follow;
+  return entry?{weaponStyle:"",conceptName:entry.label,coachingCue:mechanic.coachingCue}:{weaponStyle:"",conceptName:"Follow",coachingCue:COMBAT_MECHANICS.follow.coachingCue};
  }
  return{weaponStyle:"",conceptName:""};
 }
+
+function getCombatMechanic(entry){
+ if(S.currentCombatMechanicId){
+  const current=getCombatMechanicById(S.currentCombatMechanicId);
+  if(entry?.mechanics?.includes(current.id))return current;
+ }
+ const ids=entry?.mechanics?.length?entry.mechanics:[entry?.id||S.scenarioName||"follow"];
+ const candidates=ids.map(getCombatMechanicById).filter(Boolean);
+ const recent=S.combatMechanicHistory.slice(-3);
+ let pool=candidates.filter(mechanic=>mechanic.id!==recent[recent.length-1]?.id);
+ if(!pool.length)pool=[...candidates];
+ if(recent.length>=2&&recent.slice(-2).every(item=>item.family===recent[recent.length-1].family)){
+  const varied=pool.filter(mechanic=>mechanic.family!==recent[recent.length-1].family);
+  if(varied.length)pool=varied;
+ }
+ const total=pool.reduce((sum,mechanic)=>sum+(mechanic.weight||1),0);
+ let threshold=Math.random()*Math.max(1,total);
+ let mechanic=pool[0]||COMBAT_MECHANICS.follow;
+ for(const candidate of pool){
+  threshold-=(candidate.weight||1);
+  if(threshold<=0){mechanic=candidate;break;}
+ }
+ S.currentCombatMechanicId=mechanic.id;
+ S.combatMechanicHistory.push({id:mechanic.id,family:mechanic.family});
+ if(S.combatMechanicHistory.length>3)S.combatMechanicHistory.shift();
+ return mechanic;
+}
+
+function combatUsableBand(minFactor,maxFactor){
+ const deadzone=Math.max(0,Math.min(.5,(+$("stickDeadzone")?.value||0)/100));
+ const usableOuter=.88;
+ const usableSpan=Math.max(.18,usableOuter-deadzone);
+ const toOutputRadius=raw=>Math.max(0,Math.min(.86,(raw-deadzone)/Math.max(.01,1-deadzone)));
+ return{
+  min:toOutputRadius(deadzone+usableSpan*minFactor),
+  max:toOutputRadius(Math.min(usableOuter,deadzone+usableSpan*maxFactor))
+ };
+}
+
+function sampleCombatAimBand(){
+ const roll=Math.random();
+ if(roll<.30)return-(.12+Math.random()*.18);
+ if(roll<.70)return (Math.random()-.5)*.16;
+ return .12+Math.random()*.18;
+}
+
+function sampleCombatVerticalProfile(profile){
+ if(profile==="neutralTight")return (Math.random()-.5)*.12;
+ return sampleCombatAimBand();
+}
+
+function clampCombatTargetToBand(x,y,minRadius,maxRadius){
+ const distance=Math.hypot(x,y);
+ if(!distance)return{x:minRadius,y:0};
+ const clamped=Math.max(minRadius,Math.min(maxRadius,distance));
+ const scale=clamped/distance;
+ return{x:x*scale,y:y*scale};
+}
+
+function chooseBiasedDirection(preferredDirection,followChance=.7){
+ if(Math.random()<followChance)return preferredDirection;
+ return Math.random()<.5?-1:1;
+}
+
+function sampleCombatMovementTask(mechanic,amount,options={}){
+ const direction=options.direction||(Math.random()<.5?-1:1);
+ const leftBand=combatBandForSide(mechanic,"left");
+ const leftPressureBand=combatUsableBand(leftBand[0],leftBand[1]);
+ const strafeScale=options.strafeScale||(.7+Math.random()*.18);
+ const leftX=direction*amount*strafeScale;
+ const diagonalTilt=Math.random()<mechanic.left.diagonalChance;
+ const leftY=diagonalTilt
+  ?(Math.random()<.5?-1:1)*(.05+Math.random()*.07)
+  :((Math.random()<.16?(Math.random()-.5)*.05:0));
+ const leftTarget=clampCombatTargetToBand(leftX,leftY,leftPressureBand.min,leftPressureBand.max);
+ return{leftX:leftTarget.x,leftY:leftTarget.y,direction};
+}
+
+function sampleCombatAimTask(mechanic,direction){
+ const rightBand=combatBandForSide(mechanic,"right");
+ const rightPressureBand=combatUsableBand(rightBand[0],rightBand[1]);
+ const sameSideDirection=chooseBiasedDirection(direction,mechanic.right.horizontal.followChance||.78);
+ const oppositeDirection=chooseBiasedDirection(-direction,mechanic.right.horizontal.followChance||.78);
+ let rightX=0;
+ let rightY=sampleCombatVerticalProfile(mechanic.right.vertical.profile);
+
+ if(mechanic.right.horizontal.mode==="same"){
+  rightX=sameSideDirection*(mechanic.right.horizontal.min+Math.random()*(mechanic.right.horizontal.max-mechanic.right.horizontal.min));
+ }else if(mechanic.right.horizontal.mode==="opposite"){
+  rightX=oppositeDirection*(mechanic.right.horizontal.min+Math.random()*(mechanic.right.horizontal.max-mechanic.right.horizontal.min));
+ }else if(mechanic.right.horizontal.mode==="sameOrFree"){
+  const mixDirection=chooseBiasedDirection(direction,mechanic.right.horizontal.followChance||.62);
+  rightX=mixDirection*(mechanic.right.horizontal.min+Math.random()*(mechanic.right.horizontal.max-mechanic.right.horizontal.min));
+ }else if(mechanic.right.horizontal.mode==="free"){
+  rightX=mechanic.right.horizontal.min+Math.random()*(mechanic.right.horizontal.max-mechanic.right.horizontal.min);
+ }
+
+ if(mechanic.right.vertical.jitterChance&&Math.random()<mechanic.right.vertical.jitterChance){
+  rightY+=(Math.random()<.5?-1:1)*(mechanic.right.vertical.jitterMin+Math.random()*(mechanic.right.vertical.jitterMax-mechanic.right.vertical.jitterMin));
+ }
+
+ const rightTarget=clampCombatTargetToBand(rightX,Math.max(-.34,Math.min(.34,rightY)),rightPressureBand.min,rightPressureBand.max);
+ return{rightX:rightTarget.x,rightY:Math.max(-.34,Math.min(.34,rightTarget.y))};
+}
+
+function sampleCombatTargets(entry,amount,options={}){
+ const mechanic=getCombatMechanic(entry);
+ const movementTask=sampleCombatMovementTask(mechanic,amount,options);
+ const aimTask=sampleCombatAimTask(mechanic,movementTask.direction);
+ if(Math.abs(movementTask.leftX)<Math.abs(movementTask.leftY)*1.2)return null;
+ if(Math.hypot(aimTask.rightX-movementTask.leftX,aimTask.rightY-movementTask.leftY)<.12)return null;
+ return{leftX:movementTask.leftX,leftY:movementTask.leftY,rightX:aimTask.rightX,rightY:aimTask.rightY,direction:movementTask.direction};
+}
+
+function applyCombatTargets(entry,amount,options={}){
+ let targets=null;
+ for(let attempt=0;attempt<6&&!targets;attempt++)targets=sampleCombatTargets(entry,amount,options);
+ if(!targets)targets=sampleCombatTargets(entry,amount,{...options,direction:Math.random()<.5?-1:1,strafeScale:.76});
+ S.scenarioLeft.targetX=targets.leftX;
+ S.scenarioLeft.targetY=targets.leftY;
+ S.scenarioRight.targetX=targets.rightX;
+ S.scenarioRight.targetY=targets.rightY;
+ if(options.immediate){
+  S.scenarioLeft.x=targets.leftX;
+  S.scenarioLeft.y=targets.leftY;
+  S.scenarioRight.x=targets.rightX;
+  S.scenarioRight.y=targets.rightY;
+ }
+ return targets.direction;
+}
+
 const CHALLENGE_MODE_POOL=["sequence","simultaneous","sticks","dualsticks","strafeaim","dualtrack","reactivetrack",...COMBAT_SCENARIOS.map(entry=>entry.id)];
 
 function challengeEntryMeta(entry){
  const combatEntry=getCombatScenarioEntry(entry);
- if(combatEntry)return{mode:combatEntry.mode,label:`${combatEntry.weaponStyle} — ${combatEntry.conceptName}`,scenario:combatEntry.id,challengeCategory:"combat",weaponStyle:combatEntry.weaponStyle,conceptName:combatEntry.conceptName};
+ if(combatEntry){
+  const mechanicId=combatEntry.mechanics?.[0]||combatEntry.id;
+  const mechanic=getCombatMechanicById(mechanicId);
+  return{mode:combatEntry.mode,label:combatEntry.label,scenario:combatEntry.id,challengeCategory:"combat",weaponStyle:"",conceptName:combatEntry.label,mechanicId,family:mechanic.family};
+ }
  const labels={sequence:"Sequence",simultaneous:"Simultaneous Buttons",sticks:"Single Stick",dualsticks:"Simultaneous Sticks",strafeaim:"Strafe + Aim",dualtrack:"Dual Tracking",reactivetrack:"Reactive Tracking",gamescenario:"Combat"};
  return{mode:entry,label:labels[entry]||entry,scenario:null,challengeCategory:challengeEntryCategory(entry)};
 }
@@ -916,12 +1467,10 @@ function buildChallengeQueue(){
     candidates=differentCategoryCandidates;
    }
   }
-  if(typeKey==="combat"&&lastCombatMeta&&candidates.length>1){
-    const differentStyleCandidates=candidates.filter(mode=>challengeEntryMeta(mode).weaponStyle!==lastCombatMeta.weaponStyle);
-    if(differentStyleCandidates.length)candidates=differentStyleCandidates;
+  if((typeKey==="combat"||typeKey==="mechanic")&&lastCombatMeta&&candidates.length>1){
     const differentCombatCandidates=candidates.filter(mode=>{
      const meta=challengeEntryMeta(mode);
-     return meta.weaponStyle!==lastCombatMeta.weaponStyle||meta.conceptName!==lastCombatMeta.conceptName;
+       return meta.mechanicId!==lastCombatMeta.mechanicId&&meta.family!==lastCombatMeta.family;
     });
     if(differentCombatCandidates.length){
      candidates=differentCombatCandidates;
@@ -963,8 +1512,10 @@ function clearActiveDrillState(options={}){
  S.reactiveRight={x:0,y:0,vx:0,vy:0,nextChange:0,nextJump:0,pauseUntil:0};
  S.strafeAimLeft={x:0,targetX:0,nextChange:0};
  S.strafeAimRight={phase:0};
- S.scenarioLeft={x:0,y:0,targetX:0,nextChange:0};
- S.scenarioRight={x:0,y:0,vx:0,vy:0,nextChange:0,nextJump:0};
+ S.scenarioLeft={x:0,y:0,vx:0,vy:0,targetVx:0,targetVy:0,speed:0,targetX:0,targetY:0,nextChange:0};
+ S.scenarioRight={x:0,y:0,vx:0,vy:0,targetVx:0,targetVy:0,speed:0,targetX:0,targetY:0,nextChange:0,nextJump:0};
+ S.combatRoleSwap=false;
+ S.scenarioMotionStartedAt=0;
  S.scenarioName="";
  S.weaponStyle="";
  S.conceptName="";
@@ -1010,6 +1561,7 @@ function applyChallengeScenario(mode){
 
 function beginChallengeMode(){
  if(!S.challengeMode)return;
+ endMechanicTrace("challenge-restart");
  clearActiveDrillState({resetController:true,resetPromptUi:true});
  resetChallengeSnapState();
  S.challengeCurrentMode=null;
@@ -1044,13 +1596,14 @@ function challengeTargetForCurrentMode(){
  if(mode==="simultaneous")return 2+Math.floor(Math.random()*3);
  if(mode==="sticks")return 2+Math.floor(Math.random()*3);
  if(mode==="dualsticks")return 2+Math.floor(Math.random()*3);
- if(mode==="strafeaim")return 2+Math.floor(Math.random()*3);
+ if(mode==="strafeaim")return null;
  return null;
 }
 
 function challengeDurationForCurrentMode(){
  const mode=S.mode;
- if(mode==="dualtrack"||mode==="reactivetrack"||mode==="gamescenario")return 6000+Math.floor(Math.random()*6000);
+ if(mode==="gamescenario"&&S.challengeMode&&S.challengeType==="mechanic")return 8000+Math.floor(Math.random()*7001);
+ if(mode==="strafeaim"||mode==="dualtrack"||mode==="reactivetrack"||mode==="gamescenario")return 6000+Math.floor(Math.random()*6000);
  return null;
 }
 
@@ -1065,16 +1618,26 @@ function beginChallengeDrill(){
  }
 }
 
-function advanceChallengeMode(){
- if(!S.challengeMode||!S.running||S.paused||S.challengeTransitioning||S.challengeSessionFinalized)return;
+function requestChallengeTransition(reason="advance"){
+ if(!S.challengeMode||!S.running||S.paused||S.challengeSessionFinalized)return false;
+ if(S.challengeTransitioning)return false;
+ cancelPendingChallengeFocusSnap();
  S.challengeTransitioning=true;
  S.challengeTransitionStartedAt=performance.now();
+ S.challengeSwitchPending=false;
+ S.challengeSwitchAt=null;
+ return true;
+}
+
+function advanceChallengeMode(){
+ if(!S.challengeMode||!S.running||S.paused||!S.challengeTransitioning||S.challengeSessionFinalized)return;
  if(S.mode&&S.mode!="challenge"){
   if(!S.challengeCompletedModes.includes(S.challengeCurrentMode||S.mode))S.challengeCompletedModes.push(S.challengeCurrentMode||S.mode);
  }
  const nextEntry=S.challengeQueue.shift()||buildChallengeQueue().shift();
  if(!nextEntry){S.challengeTransitioning=false;S.challengeTransitionStartedAt=0;return;}
  const entryMeta=challengeEntryMeta(nextEntry);
+ endMechanicTrace("duration-complete");
  clearActiveDrillState({resetController:true,resetPromptUi:true});
  S.challengeCurrentMode=nextEntry;
  S.mode=entryMeta.mode;
@@ -1088,7 +1651,6 @@ function advanceChallengeMode(){
  updateContextualSettings();
  applyTrainingLayout();
  newRound();
- render();
  queueChallengeFocusSnap(S.challengeCurrentMode);
  S.challengeTransitioning=false;
  S.challengeTransitionStartedAt=0;
@@ -1105,7 +1667,6 @@ function recordChallengeOutcome(mode,ok){
  if(ok)entry.successes++;else entry.failures++;
  const meta=challengeEntryMeta(mode);
  if(meta.challengeCategory==="combat"){
-  if(meta.weaponStyle&&!S.combatStylesPracticed.includes(meta.weaponStyle))S.combatStylesPracticed.push(meta.weaponStyle);
   if(meta.conceptName&&!S.combatConceptsPracticed.includes(meta.conceptName))S.combatConceptsPracticed.push(meta.conceptName);
  }
 }
@@ -1122,8 +1683,8 @@ function updateChallengeSummary(){
  const bestName=best?challengeEntryMeta(best.mode).label:"—";
  const needsPracticeName=needsPractice?challengeEntryMeta(needsPractice.mode).label:"—";
  const challengeLine=`${typeMeta.label}. Modes completed: ${S.challengeCompletedModes.length || entries.length}. Best mode: ${bestName}. Needs practice: ${needsPracticeName}.`;
- const combatLine=S.challengeType==="combat"&&S.combatStylesPracticed.length
-  ?`Combat styles: ${S.combatStylesPracticed.join(", ")}. Concepts: ${S.combatConceptsPracticed.join(", ")}.`
+ const combatLine=(S.challengeType==="combat"||S.challengeType==="mechanic")&&S.combatConceptsPracticed.length
+  ?`Combat mechanics: ${S.combatConceptsPracticed.join(", ")}.`
   :"";
  summary.textContent=combatLine?`${challengeLine}\n${combatLine}`:challengeLine;
  summary.classList.remove("hidden");
@@ -1192,6 +1753,7 @@ function newRound(){
   S.trackingEnd=S.trackingStart+trackingIntervalMs();
   S.trackingOnTargetMs=0;
   S.trackingLastFrame=S.trackingStart;
+   S.continuousModeLastFrame=S.trackingStart;
   S.trackingPhaseLeft=Math.random()*Math.PI*2;
   S.trackingPhaseRight=Math.random()*Math.PI*2;
   S.trackingWanderLeft={x:0,y:0,vx:.22,vy:.17};
@@ -1208,6 +1770,7 @@ function newRound(){
   S.trackingEnd=S.trackingStart+trackingIntervalMs();
   S.trackingOnTargetMs=0;
   S.trackingLastFrame=S.trackingStart;
+   S.continuousModeLastFrame=S.trackingStart;
   const now=S.trackingStart;
   S.reactiveLeft={x:-.25,y:.1,vx:.35,vy:-.2,nextChange:now+300,nextJump:now+1400,pauseUntil:0};
   S.reactiveRight={x:.25,y:-.1,vx:-.3,vy:.25,nextChange:now+450,nextJump:now+1700,pauseUntil:0};
@@ -1219,9 +1782,15 @@ function newRound(){
   const selected=resolveCombatScenarioId($("gameScenarioType").value);
   const scenario=selected==="mixed"?COMBAT_SCENARIOS[Math.floor(Math.random()*COMBAT_SCENARIOS.length)].id:selected;
   const entry=getCombatScenarioEntry(scenario);
+  S.currentCombatMechanicId=null;
+  const mechanic=getCombatMechanic(entry);
+  const activationCount=S.combatActivationCounts[mechanic.id]||0;
+  S.combatRoleSwap=!!(mechanic.motion.alternateRoles&&activationCount%2===1);
+  S.combatActivationCounts[mechanic.id]=activationCount+1;
+  S.scenarioMotionStartedAt=now;
   S.scenarioName=scenario;
-  S.weaponStyle=entry?.weaponStyle||"";
-  S.conceptName=entry?.conceptName||"";
+  S.weaponStyle="";
+  S.conceptName=entry?.label||"";
   S.stickTargets=[
    {side:"ls",angle:0,distance:.28,role:"scenario-left"},
    {side:"rs",angle:180,distance:.38,role:"scenario-right"}
@@ -1233,9 +1802,40 @@ function newRound(){
   S.scenarioRightOnMs=0;
   S.trackingLastFrame=now;
   const amount=+$("leftMovementAmount").value;
-  const initialDirection=Math.random()<.5?-1:1;
-  S.scenarioLeft={x:initialDirection*amount*.55,y:0,targetX:initialDirection*amount,nextChange:now+650};
-  S.scenarioRight={x:0,y:0,vx:.24,vy:-.16,nextChange:now+420,nextJump:now+1400};
+  S.scenarioLeft={x:0,y:0,vx:0,vy:0,targetVx:0,targetVy:0,speed:0,targetX:0,targetY:0,nextChange:now+650};
+  S.scenarioRight={x:0,y:0,vx:0,vy:0,targetVx:0,targetVy:0,speed:0,targetX:0,targetY:0,nextChange:now+420,nextJump:now+1400};
+  const movementDirection=applyCombatTargets(entry,amount,{immediate:true});
+  S.stickTargets[0].angle=(Math.atan2(S.scenarioLeft.y,S.scenarioLeft.x)*180/Math.PI+360)%360;
+  S.stickTargets[0].distance=Math.hypot(S.scenarioLeft.x,S.scenarioLeft.y);
+  S.stickTargets[1].angle=(Math.atan2(S.scenarioRight.y,S.scenarioRight.x)*180/Math.PI+360)%360;
+  S.stickTargets[1].distance=Math.hypot(S.scenarioRight.x,S.scenarioRight.y);
+  {
+  const motion=activeCombatMotion(mechanic);
+   const trackingSpeed=+$('trackingSpeed').value||.75;
+   const baseMovementSpeed=.11+trackingSpeed*.09;
+   const movementSpeed=baseMovementSpeed*motion.leftSpeed;
+   const aimSpeed=baseMovementSpeed*motion.rightSpeed;
+   const movementAngle=(movementDirection<0?Math.PI:0)+(Math.random()-.5)*.45;
+  S.scenarioLeft.targetVx=Math.cos(movementAngle)*movementSpeed;
+  S.scenarioLeft.targetVy=Math.sin(movementAngle)*movementSpeed;
+  const entryScale=motion.entryFloor||1;
+  S.scenarioLeft.vx=S.scenarioLeft.targetVx*entryScale;
+  S.scenarioLeft.vy=S.scenarioLeft.targetVy*entryScale;
+   S.scenarioLeft.speed=movementSpeed;
+  S.scenarioLeft.nextChange=now+motion.changeMin+Math.random()*(motion.changeMax-motion.changeMin);
+  const aimAngle=motion.relation==="opposite"||motion.relation==="counter"
+   ?movementAngle+Math.PI
+   :motion.relation==="independent"?Math.random()*Math.PI*2:movementAngle+(motion.offset||0);
+  S.scenarioRight.targetVx=Math.cos(aimAngle)*aimSpeed;
+  S.scenarioRight.targetVy=Math.sin(aimAngle)*aimSpeed;
+  S.scenarioRight.vx=S.scenarioRight.targetVx*entryScale;
+  S.scenarioRight.vy=S.scenarioRight.targetVy*entryScale;
+  S.scenarioRight.speed=aimSpeed;
+  const rightChangeScale=motion.rightChangeScale||1;
+  S.scenarioRight.nextChange=now+(motion.changeMin+Math.random()*(motion.changeMax-motion.changeMin))*rightChangeScale;
+  }
+  S.continuousModeLastFrame=now;
+  beginMechanicTrace(now);
   S.roundLimit=trackingIntervalMs();
   S.deadline=S.trackingEnd;
  }
@@ -1379,6 +1979,7 @@ function completeRound(){
  S.successWindow.push(true);
  if(S.mode==="dualsticks"||S.mode==="strafeaim")S.challenge.dual100++;
  recordChallengeOutcome(activeChallengeEntryKey(),true);
+ awardCompletionScore(S.mode,ms);
  if(S.mode==="simultaneous"){
   S.simultaneousButtonReleaseButtons=[...S.seq];
   S.simultaneousButtonWaitingForRelease=true;
@@ -1394,11 +1995,11 @@ function completeRound(){
   if(challengeDurationForCurrentMode()==null){
    S.challengeProgress++;
    if(S.challengeProgress>=Math.max(1,S.challengeTargetCount||1)){
-    advanceChallengeMode();
+    requestChallengeTransition("target-complete");
     return;
    }
   }
-  if(S.challengeSwitchPending){advanceChallengeMode();return}
+  if(S.challengeSwitchPending){requestChallengeTransition("switch-pending");return}
  }
  newRound();
 }
@@ -1412,6 +2013,7 @@ function completeDualStickPair(now){
  S.successWindow.push(true);
  S.challenge.dual100++;
  recordChallengeOutcome(activeChallengeEntryKey(),true);
+ awardCompletionScore(S.mode,ms);
  S.dualStickCompletionLocked=true;
  S.dualStickNextPairAt=now+240;
  S.dualStickWaitingForRelease=true;
@@ -1424,11 +2026,11 @@ function completeDualStickPair(now){
   if(challengeDurationForCurrentMode()==null){
    S.challengeProgress++;
    if(S.challengeProgress>=Math.max(1,S.challengeTargetCount||1)){
-    advanceChallengeMode();
+    requestChallengeTransition("target-complete");
     return;
    }
   }
-  if(S.challengeSwitchPending){advanceChallengeMode();return}
+  if(S.challengeSwitchPending){requestChallengeTransition("switch-pending");return}
  }
  render();
 }
@@ -1437,7 +2039,7 @@ function failRound(options={}){
  S.misses++;S.currentCombo=0;S.lastMissAt=performance.now();S.successWindow.push(false);
  recordChallengeOutcome(activeChallengeEntryKey(),false);
  if(!options.silent)tone(false);persist();updateUI();
- if(S.challengeMode&&S.challengeSwitchPending){advanceChallengeMode();return}
+ if(S.challengeMode&&S.challengeSwitchPending){requestChallengeTransition("switch-pending");return}
  newRound();
 }
 
@@ -1456,8 +2058,12 @@ function updateSimultaneousButtonReleaseState(gp){
 
 function handlePress(b){
  if(!S.running){
-  if(!$('summaryModal').classList.contains('hidden')&&b===1){
-   $('summaryModal').classList.add('hidden');
+  if(isSummaryOpen()&&b===9){
+   restartSessionFromResults();
+   return;
+  }
+  if(isSummaryOpen()&&b===1){
+   closeSummaryOverlay();
    return;
   }
   if(b===9)startSession();
@@ -1501,6 +2107,7 @@ function handlePress(b){
  let expected=S.seq[0],ok=b===expected;
  recordButton(b,ok,now-S.start);
  if(!ok){failRound();return}
+ awardButtonInputScore(now-S.start);
  if(S.lastButton!=null)recordTransition(S.lastButton,b,now-S.lastInputAt);
  S.lastButton=b;S.seq.shift();
  if(!S.seq.length)completeRound();else render();
@@ -1531,6 +2138,28 @@ function targetGeometry(){
  }
  return{center:85,radius:72};
 }
+
+function setTargetArrow(id,a,d){
+ const arrow=$(id);
+ if(!arrow)return;
+ if(d<=0){arrow.classList.add("hidden");return;}
+ const g=targetGeometry(),rad=a*Math.PI/180;
+ const offset=28;
+ let x=g.center+Math.cos(rad)*(g.radius*d+offset);
+ let y=g.center+Math.sin(rad)*(g.radius*d+offset);
+ const side=id.startsWith("left")?"left":"right";
+ ({x,y}=applyVisualOffset(side,x,y));
+ arrow.style.left=x+"px";
+ arrow.style.top=y+"px";
+ arrow.style.transform=`translate(-50%,-50%) rotate(${a+45}deg)`;
+ arrow.classList.remove("hidden");
+}
+
+function setTargetArrowVisibility(showLeft,showRight){
+ $("leftTargetArrow")?.classList.toggle("hidden",!showLeft);
+ $("rightTargetArrow")?.classList.toggle("hidden",!showRight);
+}
+
 function setDot(id,a,d){
  const g=targetGeometry(),rad=a*Math.PI/180;
  let x=g.center+Math.cos(rad)*g.radius*d;
@@ -1541,6 +2170,8 @@ function setDot(id,a,d){
  el.style.left=x+"px";el.style.top=y+"px";
  const zone=id==="leftTargetDot"?$("leftTargetZone"):id==="rightTargetDot"?$("rightTargetZone"):null;
  if(zone){zone.style.left=x+"px";zone.style.top=y+"px"}
+ if(id==="leftTargetDot")setTargetArrow("leftTargetArrow",a,d);
+ else if(id==="rightTargetDot")setTargetArrow("rightTargetArrow",a,d);
 }
 function setLive(id,x,y){
  const adjusted=stickFeel(x,y);
@@ -1556,20 +2187,35 @@ function setLive(id,x,y){
 }
 function renderStickPrompt(){
  clearHighlights();
+ setTargetArrowVisibility(false,false);
  updateArenaClarity(false,false);
  $("sharedArena")?.classList.remove("both-on");
  let lt=S.stickTargets.find(t=>t.side==="ls"),rt=S.stickTargets.find(t=>t.side==="rs");
  const combatMode=["strafeaim","dualtrack","reactivetrack","gamescenario"].includes(S.mode);
+ const combatScenario=S.mode==="gamescenario";
  const combatDescriptor=getCombatScenarioDescriptor();
+ const combatMechanic=combatScenario?getCombatMechanicById(S.currentCombatMechanicId||getCombatScenarioEntry(S.scenarioName||S.challengeScenarioPreset||($("gameScenarioType")?.value))?.mechanics?.[0]):null;
+ const badgeLabel=S.mode==="dualtrack"?"TRACK BOTH":S.mode==="reactivetrack"?"TRACK":"MOVE + AIM";
+ const contextLabel=S.mode==="dualtrack"?"DUAL TRACKING":
+  S.mode==="reactivetrack"?"REACTIVE TRACKING":
+  S.mode==="strafeaim"?"STRAFE + AIM":
+  S.challengeMode&&S.challengeType==="mechanic"?combatDescriptor.conceptName:
+  `COMBAT · ${combatDescriptor.conceptName}`;
  S.weaponStyle=combatDescriptor.weaponStyle;
  S.conceptName=combatDescriptor.conceptName;
  $("stickModeBanner").classList.toggle("hidden",!combatMode);
- $("stickModeBanner").textContent=combatMode?`Combat · ${S.conceptName} · ${S.weaponStyle}`:"";
+ $("combatCueLabel").classList.toggle("hidden",!combatScenario);
+ $("combatPromptBadge").classList.toggle("hidden",!combatMode);
+ $("combatPromptBadge").textContent=combatMode?badgeLabel:"";
+ $("stickModeBanner").textContent=combatMode?contextLabel:"";
+ $("combatCueLabel").textContent=combatScenario&&combatMechanic?combatMechanic.coachingCue.toUpperCase():"";
+ $("stickModeBanner").classList.toggle("hud-context-label",combatMode);
  $("stickModeBanner").classList.toggle("reactive",S.mode==="reactivetrack");
  $("stickModeBanner").classList.toggle("scenario",S.mode==="gamescenario");
- $("trackingScorePanel").classList.toggle("hidden",!["dualtrack","reactivetrack","gamescenario"].includes(S.mode));
+ $("trackingScorePanel").classList.toggle("hidden",!["strafeaim","dualtrack","reactivetrack","gamescenario"].includes(S.mode));
  $("trackingScorePanel").classList.toggle("reactive",S.mode==="reactivetrack");
  $("trackingScorePanel").classList.toggle("scenario",S.mode==="gamescenario");
+ const showDirectionalArrows=["sticks","dualsticks","strafeaim","gamescenario"].includes(S.mode);
 
  for(const [side,t] of [["left",lt],["right",rt]]){
   let text=$(side+"TargetText"),stats=$(side+"TargetStats"),dot=$(side+"TargetDot");
@@ -1602,6 +2248,7 @@ function renderStickPrompt(){
 
   setDot(side+"TargetDot",t.angle,t.distance);
  }
+ setTargetArrowVisibility(showDirectionalArrows&&!!lt,showDirectionalArrows&&!!rt);
 
  if(S.mode==="dualtrack"||S.mode==="reactivetrack"||S.mode==="gamescenario"){
   $("prompt").textContent=S.mode==="reactivetrack"?"REACT TO BOTH TARGETS":S.mode==="gamescenario"?"MOVE + AIM":"TRACK BOTH TARGETS";
@@ -1745,64 +2392,110 @@ function updateReactiveTrackingTargets(now){
 
 function updateGameScenarioTargets(now){
  if(S.mode!=="gamescenario"||!S.stickTargets.length)return;
- const dt=Math.min(.05,Math.max(0,(now-S.continuousModeLastFrame)/1000));
- const amount=+$("leftMovementAmount").value;
- const scenario=S.scenarioName;
  const left=S.scenarioLeft;
  const right=S.scenarioRight;
+ const mechanic=activeCombatMechanic();
+ const motion=activeCombatMotion(mechanic);
+ const dt=Math.min(.05,Math.max(0,(now-S.continuousModeLastFrame)/1000));
+ const leftBandConfig=combatBandForSide(mechanic,"left");
+ const rightBandConfig=combatBandForSide(mechanic,"right");
+ const leftBand=combatUsableBand(leftBandConfig[0],leftBandConfig[1]);
+ const rightBand=combatUsableBand(rightBandConfig[0],rightBandConfig[1]);
+ const pathTargets=combatParameterizedTargets(mechanic,motion,now,leftBand,rightBand);
 
- let leftChangeMin=700,leftChangeMax=1250,leftSmooth=2.8;
- let rightSpeed=.46,rightChangeMin=520,rightChangeMax=900;
- let rightBias=0.0;
-
- if(scenario==="smg"){
-  leftChangeMin=500;leftChangeMax=850;leftSmooth=3.2;
-  rightSpeed=.62;rightChangeMin=360;rightChangeMax=650;rightBias=.16;
- }else if(scenario==="shotgun"){
-  leftChangeMin=900;leftChangeMax=1500;leftSmooth=2.1;
-  rightSpeed=.33;rightChangeMin=720;rightChangeMax=1100;rightBias=-.12;
- }else if(scenario==="micro"){
-  leftChangeMin=650;leftChangeMax=980;leftSmooth=2.4;
-  rightSpeed=.28;rightChangeMin=480;rightChangeMax=780;rightBias=.08;
- }else if(scenario==="reset"){
-  leftChangeMin=1050;leftChangeMax=1750;leftSmooth=3.4;
-  rightSpeed=.24;rightChangeMin=760;rightChangeMax=1180;rightBias=-.18;
- }
-
- if(now>=left.nextChange){
-  if(scenario==="reset"&&Math.random()<.35)left.targetX=0;
-  else{
-   const scale=scenario==="micro"?.42:scenario==="shotgun"?.65:.78+Math.random()*.22;
-   const direction=Math.random()<.5?-1:1;
-   left.targetX=direction*amount*scale;
+ const velocityBlend=Math.min(1,dt*2.4);
+ if(pathTargets.left){
+  advanceCombatPathBody(left,pathTargets.left,motion,dt);
+ }else{
+  if(now>=left.nextChange){
+   const currentAngle=Math.atan2(left.targetVy,left.targetVx);
+   const nextAngle=motion.reverse?currentAngle+Math.PI+(Math.random()-.5)*motion.turn:currentAngle+(Math.random()-.5)*motion.turn;
+   left.targetVx=Math.cos(nextAngle)*left.speed;
+   left.targetVy=Math.sin(nextAngle)*left.speed;
+   left.nextChange=now+motion.changeMin+Math.random()*(motion.changeMax-motion.changeMin);
   }
-  left.nextChange=now+leftChangeMin+Math.random()*(leftChangeMax-leftChangeMin);
+  const leftSpeedScale=combatMotionSpeedScale(left,leftBand,motion,now);
+  left.vx+=(left.targetVx*leftSpeedScale-left.vx)*velocityBlend;
+  left.vy+=(left.targetVy*leftSpeedScale-left.vy)*velocityBlend;
+  left.x+=left.vx*dt;
+  left.y+=left.vy*dt;
  }
 
- left.x+=(left.targetX-left.x)*Math.min(1,dt*leftSmooth);
- left.y+=(0-left.y)*Math.min(1,dt*5.5);
-
- if(now>=right.nextChange){
-  const angle=(Math.random()*Math.PI*2)+rightBias;
-  const magnitude=rightSpeed*(.78+Math.random()*.22);
-  right.vx=Math.cos(angle)*magnitude;
-  right.vy=Math.sin(angle)*magnitude;
-  right.nextChange=now+rightChangeMin+Math.random()*(rightChangeMax-rightChangeMin);
+ const leftDistance=Math.hypot(left.x,left.y);
+ if(leftDistance>leftBand.max||leftDistance<leftBand.min){
+  const boundary=leftDistance>leftBand.max?leftBand.max:leftBand.min;
+  const normalX=leftDistance?left.x/leftDistance:1;
+  const normalY=leftDistance?left.y/leftDistance:0;
+  left.x=normalX*boundary;
+  left.y=normalY*boundary;
+  const outward=left.vx*normalX+left.vy*normalY;
+  const shouldReflect=(leftDistance>leftBand.max&&outward>0)||(leftDistance<leftBand.min&&outward<0);
+  if(shouldReflect){
+    const reflection=motion.boundaryResponse||1.35;
+    left.vx-=reflection*outward*normalX;
+    left.vy-=reflection*outward*normalY;
+   left.targetVx=left.vx;
+   left.targetVy=left.vy;
+  }
  }
 
+ if(pathTargets.right){
+  advanceCombatPathBody(right,pathTargets.right,motion,dt);
+ }else if(motion.relation==="independent"){
+  if(now>=right.nextChange){
+   const currentAngle=Math.atan2(right.targetVy,right.targetVx);
+   const nextAngle=currentAngle+(Math.random()-.5)*motion.turn;
+   right.targetVx=Math.cos(nextAngle)*right.speed;
+   right.targetVy=Math.sin(nextAngle)*right.speed;
+  const rightChangeScale=motion.rightChangeScale||1;
+  right.nextChange=now+(motion.changeMin+Math.random()*(motion.changeMax-motion.changeMin))*rightChangeScale;
+  }
+  const rightSpeedScale=combatMotionSpeedScale(right,rightBand,motion,now);
+  right.vx+=(right.targetVx*rightSpeedScale-right.vx)*velocityBlend;
+  right.vy+=(right.targetVy*rightSpeedScale-right.vy)*velocityBlend;
+ }else{
+  const relationSign=motion.relation==="opposite"||motion.relation==="counter"?-1:1;
+  const leadSeconds=motion.leadSeconds||0;
+  const offset=motion.offset||0;
+  const baseGuideX=(left.x+left.vx*leadSeconds)*relationSign;
+  const baseGuideY=(left.y+left.vy*leadSeconds)*relationSign;
+  const guideAngle=Math.atan2(baseGuideY,baseGuideX)+offset;
+  const counterOffset=motion.relation==="counter"?.16:0;
+  const guideX=Math.cos(guideAngle)+Math.cos(guideAngle+Math.PI/2)*counterOffset;
+  const guideY=Math.sin(guideAngle)+Math.sin(guideAngle+Math.PI/2)*counterOffset;
+  const guideDistance=Math.hypot(guideX,guideY)||1;
+  const rightRadius=Math.max(rightBand.min,Math.min(rightBand.max,Math.hypot(right.targetX,right.targetY)||((rightBand.min+rightBand.max)/2)));
+  const desiredRightX=guideX/guideDistance*rightRadius;
+  const desiredRightY=guideY/guideDistance*rightRadius;
+  right.vx+=(desiredRightX-right.x)*motion.response*dt;
+  right.vy+=(desiredRightY-right.y)*motion.response*dt;
+ }
+ const rightVelocity=Math.hypot(right.vx,right.vy);
+ const rightSpeedLimit=right.speed*combatMotionSpeedScale(right,rightBand,motion,now);
+ if(rightVelocity>rightSpeedLimit){
+  right.vx=right.vx/rightVelocity*rightSpeedLimit;
+  right.vy=right.vy/rightVelocity*rightSpeedLimit;
+ }
  right.x+=right.vx*dt;
  right.y+=right.vy*dt;
-
- const distance=Math.hypot(right.x,right.y);
- if(distance>.86){
-  const nx=right.x/distance,ny=right.y/distance;
-  right.x=nx*.86;
-  right.y=ny*.86;
-  const outward=right.vx*nx+right.vy*ny;
-  right.vx-=1.6*outward*nx;
-  right.vy-=1.6*outward*ny;
+ const rightDistance=Math.hypot(right.x,right.y);
+ if(rightDistance>rightBand.max||rightDistance<rightBand.min){
+  const boundary=rightDistance>rightBand.max?rightBand.max:rightBand.min;
+  const normalX=rightDistance?right.x/rightDistance:1;
+  const normalY=rightDistance?right.y/rightDistance:0;
+  right.x=normalX*boundary;
+  right.y=normalY*boundary;
+  const outward=right.vx*normalX+right.vy*normalY;
+  const shouldReflect=(rightDistance>rightBand.max&&outward>0)||(rightDistance<rightBand.min&&outward<0);
+  if(shouldReflect){
+    const reflection=motion.boundaryResponse||1.35;
+    right.vx-=reflection*outward*normalX;
+    right.vy-=reflection*outward*normalY;
+   right.targetVx=right.vx;
+   right.targetVy=right.vy;
+  }
  }
-
+ updateMechanicTraceBounds(left,right);
  S.continuousModeLastFrame=now;
  S.stickTargets[0].angle=(Math.atan2(left.y,left.x)*180/Math.PI+360)%360;
  S.stickTargets[0].distance=Math.hypot(left.x,left.y);
@@ -1819,7 +2512,7 @@ function checkSticks(gp,now){
  lx=adjustedLeft.x;ly=adjustedLeft.y;rx=adjustedRight.x;ry=adjustedRight.y;
  setLive("leftLiveDot",lx,ly);setLive("rightLiveDot",rx,ry);
 
- if(S.mode==="dualtrack"||S.mode==="reactivetrack"||S.mode==="gamescenario"){
+ if(isContinuousTrackingMode()){
   const radius=+$("trackingTargetSize").value;
   const lt=S.stickTargets[0],rt=S.stickTargets[1];
   const lp={x:Math.cos(lt.angle*Math.PI/180)*lt.distance,y:Math.sin(lt.angle*Math.PI/180)*lt.distance};
@@ -1848,11 +2541,20 @@ function checkSticks(gp,now){
   }
   S.trackingWasOnTarget=bothOn;
   const dt=Math.max(0,Math.min(50,now-S.trackingLastFrame));
+    S.sessionTrackingElapsedMs+=dt;
   if(S.mode==="gamescenario"||S.mode==="strafeaim"){
    if(leftOn)S.scenarioLeftOnMs+=dt;
    if(rightOn)S.scenarioRightOnMs+=dt;
-   if(leftOn&&rightOn)S.trackingOnTargetMs+=dt;
-  }else if(leftOn&&rightOn)S.trackingOnTargetMs+=dt;
+     if(leftOn&&rightOn){
+      S.trackingOnTargetMs+=dt;
+      S.sessionTrackingOnTargetMs+=dt;
+      awardTrackingScore(dt);
+     }
+    }else if(leftOn&&rightOn){
+     S.trackingOnTargetMs+=dt;
+     S.sessionTrackingOnTargetMs+=dt;
+     awardTrackingScore(dt);
+    }
   S.trackingLastFrame=now;
 
   const arena=$("sharedArena");
@@ -1972,6 +2674,20 @@ function updateChallenges(){
  }).join("");
  persist();
 }
+
+function refreshSupplementalPanels(){
+ const analysisKey=`${S.sessionInputs}|${S.transitionTimes.length}|${S.hits}|${S.misses}`;
+ if(S.analysisRenderKey!==analysisKey){
+  S.analysisRenderKey=analysisKey;
+  updateAnalysis();
+ }
+ const challengeKey=`${S.hits}|${S.misses}|${S.longestCombo}|${S.peakApm}`;
+ if(S.challengeRenderKey!==challengeKey){
+  S.challengeRenderKey=challengeKey;
+  updateChallenges();
+ }
+}
+
 function updateCoach(){
  let weak=weakestButton(),avgT=Math.round(average(S.transitionTimes)),total=S.hits+S.misses,acc=total?Math.round(S.hits/total*100):100;
  let msg=[];
@@ -1986,25 +2702,27 @@ function updateCoach(){
 function updateUI(now=performance.now()){
  let total=S.hits+S.misses,acc=total?Math.round(S.hits/total*100):100,apm=liveApm(now);
  S.peakApm=Math.max(S.peakApm,apm);
- $("liveApm").textContent=apm;$("peakApm").textContent=S.peakApm;$("accuracy").textContent=acc+"%";
+ updateScoreDisplay();$("peakApm").textContent=S.peakApm;$("accuracy").textContent=acc+"%";
  $("currentCombo").textContent=S.currentCombo;$("longestCombo").textContent=S.longestCombo;
  $("avgTransition").textContent=S.transitionTimes.length?Math.round(average(S.transitionTimes))+" ms":"—";
  $("sessionInputs").textContent=S.sessionInputs;$("sessionSequences").textContent=S.sessionSequences;
  $("bestSequence").textContent=S.bestSequence?S.bestSequence+" ms":"—";$("hesitations").textContent=S.hesitations;
  $("recoveryTime").textContent=S.recoveryTimes.length?Math.round(average(S.recoveryTimes))+" ms":"—";
  $("pressureLabel").textContent=pressureName(S.roundLimit||baseLimit());$("timeLabel").textContent=pressureName(baseLimit());
- updateAnalysis();updateChallenges();
+ refreshSupplementalPanels();
 }
 function startSession(){
  S.running=true;S.paused=false;S.hits=0;S.misses=0;S.sessionInputs=0;S.sessionSequences=0;
  S.sessionStart=performance.now();S.currentCombo=0;S.peakApm=0;S.inputTimes=[];S.transitionTimes=[];
  S.hesitations=0;S.recoveryTimes=[];S.lastMissAt=null;S.successWindow=[];S.lastInputAt=null;
+ S.analysisRenderKey="";S.challengeRenderKey="";
+ S.currentCombatMechanicId=null;S.combatMechanicHistory=[];S.combatActivationCounts={};S.combatRoleSwap=false;
+ S.sessionTrackingOnTargetMs=0;S.sessionTrackingElapsedMs=0;
+ resetSessionScore();
  S.infiniteSession=isInfiniteEligibleMode()&&$("infiniteStickSession").checked;
  S.sessionEnd=S.infiniteSession?Infinity:S.sessionStart+sessionLengthMs();
  if(S.challengeMode){
   beginChallengeMode();
-  S.challengeSwitchPending=false;
-  S.challengeSwitchAt=null;
   updateUI();
   return;
  }
@@ -2025,9 +2743,29 @@ function pauseSession(){
  }
  render();
 }
+function isSummaryOpen(){
+ return !$("summaryModal").classList.contains("hidden");
+}
+
+function closeSummaryOverlay(){
+ if(S.resultsActionLocked||!isSummaryOpen())return;
+ $("summaryModal").classList.add("hidden");
+}
+
+function restartSessionFromResults(){
+ if(S.resultsActionLocked||!isSummaryOpen())return;
+ S.resultsActionLocked=true;
+ $("summaryModal").classList.add("hidden");
+ S.challengeSessionFinalized=false;
+ S.scoreFinalized=false;
+ startSession();
+ S.resultsActionLocked=false;
+}
+
 function finalizeChallengeResults(){
  if(!S.challengeMode||S.challengeSessionFinalized)return;
  S.challengeSessionFinalized=true;
+ endMechanicTrace("session-complete");
  resetChallengeSnapState();
  S.challengeSwitchPending=false;
  S.challengeSwitchAt=null;
@@ -2040,6 +2778,7 @@ function finalizeChallengeResults(){
 
 function stopSession(){
  if(!S.running)return;
+ finalizeSessionScore();
  clearTrails();S.running=false;S.paused=false;
  if(S.challengeMode){finalizeChallengeResults();return}
  S.lifeSessions++;persist();render();updateCoach();showReport();
@@ -2047,15 +2786,14 @@ function stopSession(){
 function showReport(){
  let total=S.hits+S.misses,acc=total?Math.round(S.hits/total*100):100;
  let duration=Math.max(1,(performance.now()-S.sessionStart)/60000),avgApm=Math.round(S.sessionInputs/duration);
- $("reportApm").textContent=avgApm;$("reportPeak").textContent=S.peakApm;$("reportAccuracy").textContent=acc+"%";
- $("reportTransition").textContent=S.transitionTimes.length?Math.round(average(S.transitionTimes))+" ms":"—";
- $("reportCombo").textContent=S.longestCombo;$("reportWeakest").textContent=weakestButton();
+ $("reportScore").textContent=formatWholeNumber(S.sessionScore);$("reportPeak").textContent=S.peakApm;$("reportAccuracy").textContent=acc+"%";
+ $("reportPace").textContent=formatWholeNumber(avgApm);$("reportCombo").textContent=S.longestCombo;$("reportOnTarget").textContent=formatOnTargetReport();
  $("reportRecommendation").textContent=$("coachText").textContent;
  if(S.challengeMode){
   const typeMeta=challengeTypeMeta();
   $("summaryTitle").textContent=`${typeMeta.label} Complete`;
   $("retrySessionBtn").textContent=`Restart ${typeMeta.label}`;
-  $("closeSummaryBtn").textContent="Return to Menu";
+  $("closeSummaryBtn").textContent="Close";
   updateChallengeSummary();
  }else{
   $("summaryTitle").textContent="Session Complete";
@@ -2063,14 +2801,12 @@ function showReport(){
   $("closeSummaryBtn").textContent="Close";
   $("challengeSummary").classList.add("hidden");
  }
+ $("summaryControlsHint").textContent=`START - ${$("retrySessionBtn").textContent}   B - Close`;
+ S.resultsActionLocked=false;
  $("summaryModal").classList.remove("hidden");
 }
 function frame(now){
- if(S.challengeMode&&S.challengeTransitioning&&S.challengeTransitionStartedAt&&now>=S.challengeTransitionStartedAt+400){
-  S.challengeTransitioning=false;
-  S.challengeTransitionStartedAt=0;
-  S.challengeSwitchPending=false;
-  S.challengeSwitchAt=null;
+ if(S.challengeMode&&S.challengeTransitioning&&S.challengeTransitionStartedAt&&now>=S.challengeTransitionStartedAt+120){
   advanceChallengeMode();
   requestAnimationFrame(frame);
   return;
@@ -2089,7 +2825,7 @@ function frame(now){
   S.challengeSwitchPending=true;
  }
  if(S.challengeMode&&S.challengeSwitchPending&&challengeDurationForCurrentMode()==null){
-  advanceChallengeMode();
+  requestChallengeTransition("fallback");
   requestAnimationFrame(frame);
   return;
  }
@@ -2143,7 +2879,7 @@ function frame(now){
    failRound({silent:silentStick});
   }
   if(S.challengeMode&&S.challengeSwitchPending&&isContinuousTrackingMode()&&rem<=0){
-   advanceChallengeMode();
+    requestChallengeTransition("continuous-boundary");
    requestAnimationFrame(frame);
    return;
   }
@@ -2161,6 +2897,7 @@ window.addEventListener("gamepadconnected",handleGamepadConnected);
 window.addEventListener("gamepaddisconnected",handleGamepadDisconnected);
 
 document.querySelectorAll(".nav").forEach(b=>b.onclick=()=>{
+ endMechanicTrace("mode-change");
  const leavingStandaloneSimultaneous=!S.challengeMode&&S.mode==="simultaneous"&&!(b.dataset.mode==="simultaneous");
  if(leavingStandaloneSimultaneous)clearSimultaneousButtonsRuntimeState();
  document.querySelectorAll(".nav").forEach(x=>x.classList.remove("active"));
@@ -2202,15 +2939,8 @@ document.querySelectorAll(".nav").forEach(b=>b.onclick=()=>{
 });
 $("startBtn").onclick=startSession;$("pauseBtn").onclick=pauseSession;$("stopBtn").onclick=stopSession;
 $("fullscreenBtn").onclick=()=>document.fullscreenElement?document.exitFullscreen():document.documentElement.requestFullscreen();
-$("closeSummaryBtn").onclick=()=>{$("summaryModal").classList.add("hidden");};
-$("retrySessionBtn").onclick=()=>{
- $("summaryModal").classList.add("hidden");
- if(S.challengeMode){
-  startSession();
- }else{
-  startSession();
- }
-};
+$("closeSummaryBtn").onclick=closeSummaryOverlay;
+$("retrySessionBtn").onclick=restartSessionFromResults;
 $("resetStatsBtn").onclick=()=>{localStorage.removeItem("ctv5");location.reload()};
 $("timeSlider").oninput=()=>{updateUI();if(S.running){S.roundLimit=effectiveLimit();S.start=performance.now();S.deadline=S.start+S.roundLimit}};
 $("trainingDifficulty").oninput=()=>applyDifficulty($("trainingDifficulty").value,true);
