@@ -531,9 +531,46 @@ function effectiveLimit(){
 
 const SCORE_DIFFICULTY_MULTIPLIER={1:1,2:1.1,3:1.2,4:1.35,5:1.5};
 const TRACKING_SCORE_INTERVAL_MS=400;
+const COMBAT_TRACKING_TOLERANCE_SCALE=.88;
+const COMBAT_DIFFICULTY_PROFILES={
+ 1:{motionSpeed:.52,pathRange:.72,outerPressureChance:.08,directionChangeRate:.68,trackingTolerance:1.35,independenceAmount:.5},
+ 2:{motionSpeed:.65,pathRange:.84,outerPressureChance:.2,directionChangeRate:.8,trackingTolerance:1.2,independenceAmount:.68},
+ 3:{motionSpeed:.76,pathRange:.94,outerPressureChance:.35,directionChangeRate:.9,trackingTolerance:1.05,independenceAmount:.82},
+ 4:{motionSpeed:1,pathRange:1.18,outerPressureChance:.7,directionChangeRate:1.14,trackingTolerance:.86,independenceAmount:1.25},
+ 5:{motionSpeed:1.18,pathRange:1.32,outerPressureChance:.9,directionChangeRate:1.32,trackingTolerance:.72,independenceAmount:1.5}
+};
+const COMBAT_DIFFICULTY_FIELDS_BY_FAMILY={
+ hold:["motionSpeed","pathRange","outerPressureChance","trackingTolerance"],
+ precision:["motionSpeed","trackingTolerance"],
+ counter:["motionSpeed","pathRange","outerPressureChance","directionChangeRate","trackingTolerance","independenceAmount"],
+ follow:["motionSpeed","pathRange","outerPressureChance","directionChangeRate","trackingTolerance"],
+ pressure:["motionSpeed","pathRange","outerPressureChance","directionChangeRate","trackingTolerance","independenceAmount"],
+ stability:["motionSpeed","pathRange","outerPressureChance","directionChangeRate","trackingTolerance","independenceAmount"],
+ timing:["motionSpeed","pathRange","directionChangeRate","trackingTolerance","independenceAmount"],
+ control:["motionSpeed","pathRange","directionChangeRate","trackingTolerance"],
+ separation:["motionSpeed","pathRange","outerPressureChance","directionChangeRate","trackingTolerance","independenceAmount"],
+ recovery:["motionSpeed","pathRange","directionChangeRate","trackingTolerance"],
+ release:["motionSpeed","pathRange","outerPressureChance","directionChangeRate","trackingTolerance"],
+ ladder:["motionSpeed","pathRange","outerPressureChance","directionChangeRate","trackingTolerance"],
+ curve:["motionSpeed","pathRange","directionChangeRate","trackingTolerance"],
+ angle:["motionSpeed","pathRange","trackingTolerance"],
+ priority:["motionSpeed","pathRange","directionChangeRate","trackingTolerance","independenceAmount"]
+};
 
 function clampNumber(value,min,max){
  return Math.max(min,Math.min(max,value));
+}
+
+function combatDifficultyLevel(){
+ return Math.max(1,Math.min(5,+$("trainingDifficulty")?.value||3));
+}
+
+function combatDifficultyProfile(){
+ return COMBAT_DIFFICULTY_PROFILES[combatDifficultyLevel()]||COMBAT_DIFFICULTY_PROFILES[3];
+}
+
+function combatDifficultyUses(mechanic,field){
+ return COMBAT_DIFFICULTY_FIELDS_BY_FAMILY[mechanic.family]?.includes(field)===true;
 }
 
 function formatWholeNumber(value){
@@ -988,34 +1025,34 @@ const COMBAT_SCENARIOS=[
  {id:"independentTiming",label:"Independent Timing",weaponStyle:"",conceptName:"Independent Timing",description:"One thumb deliberately leads the other while both remain continuous.",mode:"gamescenario",profile:"independentTiming",mechanics:["independentTiming"]}
 ];
 const COMBAT_MECHANICS={
- pressureHold:{id:"pressureHold",name:"Pressure Hold",coachingCue:"Keep both steady",family:"hold",behavior:"continuous",weight:3,motion:{relation:"same",leftSpeed:.3,rightSpeed:.22,response:1.9,turn:.16,changeMin:3200,changeMax:4400,offset:.04},left:{job:"stable movement",band:[.58,.72],diagonalChance:.06},right:{job:"stable aim pressure",band:[.3,.4],horizontal:{mode:"sameOrFree",followChance:.8,min:.06,max:.12},vertical:{profile:"neutralTight",jitterChance:0}}},
- microCorrections:{id:"microCorrections",name:"Micro Corrections",coachingCue:"Small aim pressure",family:"precision",behavior:"continuous",weight:3,motion:{relation:"same",leftSpeed:.5,rightSpeed:.16,response:2.2,turn:.16,changeMin:2300,changeMax:3400,offset:-.04},left:{job:"readable movement",band:[.36,.5],diagonalChance:.05},right:{job:"tiny aim changes",band:[.1,.2],horizontal:{mode:"free",min:-.05,max:.05},vertical:{profile:"neutralTight",jitterChance:0}}},
- counterPressure:{id:"counterPressure",name:"Counter Pressure",coachingCue:"Counter gently",family:"counter",behavior:"continuous",weight:3,motion:{relation:"counter",leftSpeed:.76,rightSpeed:.58,response:4.5,turn:.32,changeMin:1800,changeMax:2600},left:{job:"committed movement",band:[.56,.74],diagonalChance:.16},right:{job:"opposing aim pressure",band:[.24,.4],horizontal:{mode:"opposite",followChance:.9,min:.12,max:.24},vertical:{profile:"balanced",jitterChance:0}}},
- mirror:{id:"mirror",name:"Mirror",coachingCue:"Match, don't copy",family:"follow",behavior:"continuous",weight:3,motion:{relation:"same",leftSpeed:.68,rightSpeed:.6,response:4.6,turn:.3,changeMin:2000,changeMax:2900,offset:0},left:{job:"clear movement",band:[.46,.68],diagonalChance:.12},right:{job:"supporting aim",band:[.26,.44],horizontal:{mode:"same",followChance:.9,min:.1,max:.2},vertical:{profile:"balanced",jitterChance:0}}},
- antiMirror:{id:"antiMirror",name:"Anti-Mirror",coachingCue:"Separate the sticks",family:"counter",behavior:"continuous",weight:3,motion:{relation:"opposite",leftSpeed:.68,rightSpeed:.6,response:4.6,turn:.3,changeMin:2000,changeMax:2900,offset:0},left:{job:"clear movement",band:[.46,.68],diagonalChance:.12},right:{job:"countering aim",band:[.26,.44],horizontal:{mode:"opposite",followChance:.9,min:.1,max:.2},vertical:{profile:"balanced",jitterChance:0}}},
- unequalPressure:{id:"unequalPressure",name:"Unequal Pressure",coachingCue:"Different pressure",family:"pressure",behavior:"continuous",weight:2,motion:{relation:"independent",leftSpeed:.32,rightSpeed:.38,response:2,turn:.18,changeMin:3000,changeMax:4300},left:{job:"stronger movement pressure",band:[.64,.78],diagonalChance:.06},right:{job:"different aim pressure",band:[.14,.25],horizontal:{mode:"free",min:-.1,max:.1},vertical:{profile:"neutralTight",jitterChance:0}}},
- independentHold:{id:"independentHold",name:"Independent Hold",coachingCue:"Hold one, move one",family:"stability",behavior:"continuous",weight:3,motion:{relation:"independent",leftSpeed:.1,rightSpeed:.72,response:2.6,turn:.38,changeMin:2600,changeMax:3800,alternateRoles:true},left:{job:"narrow stable path",band:[.46,.52],diagonalChance:.04},right:{job:"active independent aim",band:[.2,.38],horizontal:{mode:"free",min:-.16,max:.16},vertical:{profile:"balanced",jitterChance:0}}},
- strafeSwitch:{id:"strafeSwitch",name:"Strafe Switch",coachingCue:"Read the reversal",family:"timing",behavior:"continuous",weight:2,motion:{relation:"same",leftSpeed:.72,rightSpeed:.55,response:3.2,turn:.08,changeMin:1700,changeMax:2400,reverse:true,offset:.06},left:{job:"readable reversals",band:[.46,.68],diagonalChance:.03},right:{job:"smooth aim path",band:[.2,.36],horizontal:{mode:"same",followChance:.86,min:.08,max:.16},vertical:{profile:"neutralTight",jitterChance:0}}},
- lead:{id:"lead",name:"Lead",coachingCue:"Aim slightly ahead",family:"timing",behavior:"continuous",weight:2,motion:{relation:"lead",path:"relationship",cycleMs:6400,phaseOffset:.14,arcSpan:.82,pathResponse:4.5,pathEntryMs:1000,leftSpeed:.64,rightSpeed:.6,response:3.2,turn:.3,changeMin:2400,changeMax:3300},left:{job:"movement path",band:[.44,.66],diagonalChance:.08},right:{job:"leading aim",band:[.22,.4],horizontal:{mode:"same",followChance:.9,min:.1,max:.18},vertical:{profile:"balanced",jitterChance:0}}},
- follow:{id:"follow",name:"Follow",coachingCue:"Track, don’t chase",family:"timing",behavior:"continuous",weight:2,motion:{relation:"same",path:"relationship",cycleMs:6400,phaseOffset:-.16,arcSpan:.82,pathResponse:3.8,pathEntryMs:1100,leftSpeed:.64,rightSpeed:.5,response:2.6,turn:.3,changeMin:2400,changeMax:3300},left:{job:"movement path",band:[.44,.66],diagonalChance:.08},right:{job:"following aim",band:[.22,.4],horizontal:{mode:"same",followChance:.9,min:.08,max:.16},vertical:{profile:"balanced",jitterChance:0}}},
- stableAim:{id:"stableAim",name:"Stable Aim",coachingCue:"Keep aim calm",family:"stability",behavior:"continuous",weight:2,motion:{relation:"independent",leftSpeed:.72,rightSpeed:.08,response:1.7,turn:.24,changeMin:2800,changeMax:4200},left:{job:"active movement",band:[.44,.66],diagonalChance:.08},right:{job:"hold aim steady",band:[.2,.25],horizontal:{mode:"free",min:-.04,max:.04},vertical:{profile:"neutralTight",jitterChance:0}}},
- stableMovement:{id:"stableMovement",name:"Stable Movement",coachingCue:"Keep movement calm",family:"stability",behavior:"continuous",weight:2,motion:{relation:"independent",leftSpeed:.08,rightSpeed:.74,response:2.6,turn:.42,changeMin:2200,changeMax:3300},left:{job:"stable movement",band:[.38,.46],diagonalChance:.04},right:{job:"active aim",band:[.2,.38],horizontal:{mode:"free",min:-.16,max:.16},vertical:{profile:"balanced",jitterChance:0}}},
- pressureUnderMotion:{id:"pressureUnderMotion",name:"Pressure Under Motion",coachingCue:"Hold aim pressure",family:"pressure",behavior:"continuous",weight:2,motion:{relation:"independent",leftSpeed:.8,rightSpeed:.08,response:2.1,turn:.55,changeMin:1700,changeMax:2400},left:{job:"changing movement",band:[.4,.68],diagonalChance:.14},right:{job:"stable off-center aim",band:[.48,.56],horizontal:{mode:"free",min:-.06,max:.06},vertical:{profile:"neutralTight",jitterChance:0}}},
- pressureUnderAim:{id:"pressureUnderAim",name:"Pressure Under Aim",coachingCue:"Hold movement pressure",family:"pressure",behavior:"continuous",weight:2,motion:{relation:"independent",leftSpeed:.08,rightSpeed:.8,response:2.6,turn:.55,changeMin:1700,changeMax:2400},left:{job:"stable off-center movement",band:[.62,.72],diagonalChance:.03},right:{job:"changing aim",band:[.2,.44],horizontal:{mode:"free",min:-.18,max:.18},vertical:{profile:"balanced",jitterChance:0}}},
- controlledEntry:{id:"controlledEntry",name:"Controlled Entry",coachingCue:"Enter smoothly",family:"control",behavior:"continuous",weight:2,motion:{relation:"independent",leftSpeed:.68,rightSpeed:.58,response:2.6,turn:.32,changeMin:2400,changeMax:3400,entryMs:2200,entryFloor:.06},left:{job:"smooth movement entry",band:[.38,.62],diagonalChance:.08},right:{job:"smooth aim entry",band:[.2,.38],horizontal:{mode:"free",min:-.14,max:.14},vertical:{profile:"balanced",jitterChance:0}}},
- controlledExit:{id:"controlledExit",name:"Controlled Exit",coachingCue:"Exit smoothly",family:"control",behavior:"continuous",weight:2,motion:{relation:"independent",leftSpeed:.7,rightSpeed:.6,response:2.8,turn:.45,changeMin:2100,changeMax:3000,decelerateMs:1100,decelerateFloor:.1},left:{job:"controlled movement exit",band:[.4,.64],diagonalChance:.08},right:{job:"controlled aim exit",band:[.2,.38],horizontal:{mode:"free",min:-.14,max:.14},vertical:{profile:"balanced",jitterChance:0}}},
- settle:{id:"settle",name:"Settle",coachingCue:"Land softly",family:"control",behavior:"continuous",weight:2,motion:{relation:"independent",leftSpeed:.65,rightSpeed:.55,response:2.4,turn:.36,changeMin:2400,changeMax:3400,settleZone:.45,settleFloor:.08},left:{job:"soft movement landing",band:[.36,.64],diagonalChance:.08},right:{job:"soft aim landing",band:[.18,.4],horizontal:{mode:"free",min:-.14,max:.14},vertical:{profile:"balanced",jitterChance:0}}},
- thumbSeparation:{id:"thumbSeparation",name:"Thumb Separation",coachingCue:"Separate the sticks",family:"separation",behavior:"continuous",weight:2,motion:{relation:"independent",leftSpeed:.78,rightSpeed:.3,response:2.8,turn:.65,changeMin:1700,changeMax:2400,rightChangeScale:1.8},left:{job:"wide movement path",band:[.55,.74],diagonalChance:.18},right:{job:"separate aim path",band:[.16,.3],horizontal:{mode:"free",min:-.14,max:.14},vertical:{profile:"balanced",jitterChance:0}}},
- recover:{id:"recover",name:"Recover",coachingCue:"Recover smoothly",family:"recovery",behavior:"continuous",weight:2,motion:{relation:"independent",path:"recover",cycleMs:4600,overshoot:.28,recoverAt:.48,pathResponse:5,pathEntryMs:900,leftSpeed:.68,rightSpeed:.58,response:3,turn:.38,changeMin:2400,changeMax:3300},left:{job:"recover movement path",band:[.4,.64],diagonalChance:.08},right:{job:"recover aim path",band:[.2,.38],horizontal:{mode:"free",min:-.14,max:.14},vertical:{profile:"balanced",jitterChance:0}}},
- commit:{id:"commit",name:"Commit",coachingCue:"Commit",family:"pressure",behavior:"continuous",weight:2,motion:{relation:"independent",path:"pressure",pressurePattern:"commit",cycleMs:4400,pathResponse:5.5,pathEntryMs:900,leftSpeed:.7,rightSpeed:.6,response:3.2,turn:.24,changeMin:2400,changeMax:3300},left:{job:"confident movement pressure",band:[.28,.7],diagonalChance:.05},right:{job:"confident aim pressure",band:[.14,.4],horizontal:{mode:"free",min:-.12,max:.12},vertical:{profile:"neutralTight",jitterChance:0}}},
- pressureChange:{id:"pressureChange",name:"Pressure Change",coachingCue:"Change pressure",family:"pressure",behavior:"continuous",weight:2,motion:{relation:"independent",path:"pressure",pressurePattern:"wave",cycleMs:4600,pathResponse:5,pathEntryMs:900,leftSpeed:.58,rightSpeed:.5,response:2.8,turn:.22,changeMin:2600,changeMax:3500},left:{job:"changing movement pressure",band:[.3,.7],diagonalChance:.06},right:{job:"changing aim pressure",band:[.16,.4],horizontal:{mode:"free",min:-.12,max:.12},vertical:{profile:"balanced",jitterChance:0}}},
- pressureRelease:{id:"pressureRelease",name:"Pressure Release",coachingCue:"Release smoothly",family:"release",behavior:"continuous",weight:2,motion:{relation:"independent",path:"pressure",pressurePattern:"release",cycleMs:5600,pathResponse:4.8,pathEntryMs:900,leftSpeed:.54,rightSpeed:.46,response:2.6,turn:.2,changeMin:2800,changeMax:3800},left:{job:"gradual movement release",band:[.28,.7],diagonalChance:.05},right:{job:"gradual aim release",band:[.14,.4],horizontal:{mode:"free",min:-.12,max:.12},vertical:{profile:"neutralTight",jitterChance:0}}},
- pressureLadder:{id:"pressureLadder",name:"Pressure Ladder",coachingCue:"Climb pressure",family:"ladder",behavior:"continuous",weight:2,motion:{relation:"independent",path:"pressure",pressurePattern:"ladder",cycleMs:6000,pathResponse:5,pathEntryMs:900,leftSpeed:.56,rightSpeed:.48,response:2.8,turn:.18,changeMin:3000,changeMax:4000},left:{job:"movement pressure levels",band:[.28,.72],diagonalChance:.05},right:{job:"aim pressure levels",band:[.14,.42],horizontal:{mode:"free",min:-.12,max:.12},vertical:{profile:"neutralTight",jitterChance:0}}},
- arcTracking:{id:"arcTracking",name:"Arc Tracking",coachingCue:"Follow the curve",family:"curve",behavior:"continuous",weight:2,motion:{relation:"independent",path:"arc",cycleMs:7200,arcSpan:1.25,pathResponse:5,pathEntryMs:1000,leftSpeed:.62,rightSpeed:.54,response:2.8,turn:.3,changeMin:2800,changeMax:3800},left:{job:"smooth movement arc",band:[.48,.68],diagonalChance:.12},right:{job:"smooth aim arc",band:[.22,.4],horizontal:{mode:"free",min:-.14,max:.14},vertical:{profile:"balanced",jitterChance:0}}},
- angleHold:{id:"angleHold",name:"Angle Hold",coachingCue:"Hold the angle",family:"angle",behavior:"continuous",weight:2,motion:{relation:"same",path:"angleHold",cycleMs:4600,pathResponse:5,pathEntryMs:900,leftSpeed:.54,rightSpeed:.46,response:3,turn:.12,changeMin:3000,changeMax:4100},left:{job:"fixed movement angle",band:[.34,.68],diagonalChance:.28},right:{job:"natural aim response",band:[.18,.38],horizontal:{mode:"same",followChance:.86,min:.07,max:.15},vertical:{profile:"balanced",jitterChance:0}}},
- movementPriority:{id:"movementPriority",name:"Movement Priority",coachingCue:"Move first",family:"priority",behavior:"continuous",weight:2,motion:{relation:"same",priority:"left",cycleMs:5200,pathResponse:5,pathEntryMs:1000,leftSpeed:.82,rightSpeed:.38,response:2.2,turn:.6,changeMin:1800,changeMax:2600,offset:.08},left:{job:"driving movement",band:[.48,.7],diagonalChance:.14},right:{job:"adapting aim",band:[.18,.34],horizontal:{mode:"same",followChance:.84,min:.07,max:.14},vertical:{profile:"balanced",jitterChance:0}}},
- aimPriority:{id:"aimPriority",name:"Aim Priority",coachingCue:"Aim first",family:"priority",behavior:"continuous",weight:2,motion:{relation:"same",priority:"right",cycleMs:5200,pathResponse:5,pathEntryMs:1000,leftSpeed:.38,rightSpeed:.82,response:2.2,turn:.6,changeMin:1800,changeMax:2600,offset:-.08},left:{job:"adapting movement",band:[.38,.58],diagonalChance:.1},right:{job:"driving aim",band:[.24,.44],horizontal:{mode:"free",min:-.16,max:.16},vertical:{profile:"balanced",jitterChance:0}}},
- independentTiming:{id:"independentTiming",name:"Independent Timing",coachingCue:"One then the other",family:"timing",behavior:"continuous",weight:2,motion:{relation:"independent",path:"timing",cycleMs:6800,leadFraction:.18,pathResponse:5,pathEntryMs:1200,leftSpeed:.62,rightSpeed:.62,response:2.8,turn:.38,changeMin:2600,changeMax:3600,alternateRoles:true},left:{job:"leading movement timing",band:[.42,.66],diagonalChance:.12},right:{job:"following aim timing",band:[.2,.4],horizontal:{mode:"free",min:-.14,max:.14},vertical:{profile:"balanced",jitterChance:0}}}
+ pressureHold:{id:"pressureHold",name:"Pressure Hold",coachingCue:"Keep both steady",family:"hold",behavior:"continuous",weight:3,motion:{relation:"same",leftSpeed:.32,rightSpeed:.24,response:2,turn:.16,changeMin:3800,changeMax:5000,offset:.04},left:{job:"stable movement",band:[.66,.8],diagonalChance:.06},right:{job:"stable aim pressure",band:[.38,.5],horizontal:{mode:"sameOrFree",followChance:.82,min:.08,max:.15},vertical:{profile:"neutralTight",jitterChance:0}}},
+ microCorrections:{id:"microCorrections",name:"Micro Corrections",coachingCue:"Small aim pressure",family:"precision",behavior:"continuous",weight:3,motion:{relation:"same",leftSpeed:.55,rightSpeed:.19,response:2.35,turn:.16,changeMin:2100,changeMax:3100,offset:-.04},left:{job:"readable movement",band:[.42,.58],diagonalChance:.05},right:{job:"tiny aim changes",band:[.12,.23],horizontal:{mode:"free",min:-.06,max:.06},vertical:{profile:"neutralTight",jitterChance:0}}},
+ counterPressure:{id:"counterPressure",name:"Counter Pressure",coachingCue:"Counter gently",family:"counter",behavior:"continuous",weight:3,motion:{relation:"counter",leftSpeed:.82,rightSpeed:.64,response:4.8,turn:.32,changeMin:1700,changeMax:2400},left:{job:"committed movement",band:[.64,.82],diagonalChance:.16},right:{job:"opposing aim pressure",band:[.3,.5],horizontal:{mode:"opposite",followChance:.92,min:.16,max:.3},vertical:{profile:"balanced",jitterChance:0}}},
+ mirror:{id:"mirror",name:"Mirror",coachingCue:"Match, don't copy",family:"follow",behavior:"continuous",weight:3,motion:{relation:"same",leftSpeed:.75,rightSpeed:.67,response:4.9,turn:.3,changeMin:1800,changeMax:2600,offset:0},left:{job:"clear movement",band:[.54,.76],diagonalChance:.12},right:{job:"supporting aim",band:[.32,.52],horizontal:{mode:"same",followChance:.92,min:.13,max:.24},vertical:{profile:"balanced",jitterChance:0}}},
+ antiMirror:{id:"antiMirror",name:"Anti-Mirror",coachingCue:"Separate the sticks",family:"counter",behavior:"continuous",weight:3,motion:{relation:"opposite",leftSpeed:.75,rightSpeed:.67,response:4.9,turn:.3,changeMin:1800,changeMax:2600,offset:0},left:{job:"clear movement",band:[.54,.76],diagonalChance:.12},right:{job:"countering aim",band:[.32,.52],horizontal:{mode:"opposite",followChance:.92,min:.13,max:.24},vertical:{profile:"balanced",jitterChance:0}}},
+ unequalPressure:{id:"unequalPressure",name:"Unequal Pressure",coachingCue:"Different pressure",family:"pressure",behavior:"continuous",weight:2,motion:{relation:"independent",leftSpeed:.35,rightSpeed:.42,response:2.15,turn:.18,changeMin:3200,changeMax:4500},left:{job:"stronger movement pressure",band:[.72,.84],diagonalChance:.06},right:{job:"different aim pressure",band:[.16,.27],horizontal:{mode:"free",min:-.11,max:.11},vertical:{profile:"neutralTight",jitterChance:0}}},
+ independentHold:{id:"independentHold",name:"Independent Hold",coachingCue:"Hold one, move one",family:"stability",behavior:"continuous",weight:3,motion:{relation:"independent",leftSpeed:.08,rightSpeed:.8,response:2.8,turn:.4,changeMin:3000,changeMax:4200,alternateRoles:true},left:{job:"narrow stable path",band:[.56,.62],diagonalChance:.04},right:{job:"active independent aim",band:[.24,.46],horizontal:{mode:"free",min:-.2,max:.2},vertical:{profile:"balanced",jitterChance:0}}},
+ strafeSwitch:{id:"strafeSwitch",name:"Strafe Switch",coachingCue:"Read the reversal",family:"timing",behavior:"continuous",weight:2,motion:{relation:"same",leftSpeed:.79,rightSpeed:.61,response:3.4,turn:.08,changeMin:1550,changeMax:2200,reverse:true,offset:.06},left:{job:"readable reversals",band:[.54,.76],diagonalChance:.03},right:{job:"smooth aim path",band:[.24,.42],horizontal:{mode:"same",followChance:.88,min:.1,max:.19},vertical:{profile:"neutralTight",jitterChance:0}}},
+ lead:{id:"lead",name:"Lead",coachingCue:"Aim slightly ahead",family:"timing",behavior:"continuous",weight:2,motion:{relation:"lead",path:"relationship",cycleMs:5800,phaseOffset:.16,arcSpan:.92,pathResponse:4.8,pathEntryMs:950,leftSpeed:.7,rightSpeed:.66,response:3.4,turn:.3,changeMin:2200,changeMax:3000},left:{job:"movement path",band:[.5,.74],diagonalChance:.08},right:{job:"leading aim",band:[.27,.47],horizontal:{mode:"same",followChance:.92,min:.12,max:.21},vertical:{profile:"balanced",jitterChance:0}}},
+ follow:{id:"follow",name:"Follow",coachingCue:"Track, don’t chase",family:"timing",behavior:"continuous",weight:2,motion:{relation:"same",path:"relationship",cycleMs:5800,phaseOffset:-.18,arcSpan:.92,pathResponse:4.1,pathEntryMs:1000,leftSpeed:.7,rightSpeed:.56,response:2.8,turn:.3,changeMin:2200,changeMax:3000},left:{job:"movement path",band:[.5,.74],diagonalChance:.08},right:{job:"following aim",band:[.27,.47],horizontal:{mode:"same",followChance:.92,min:.1,max:.19},vertical:{profile:"balanced",jitterChance:0}}},
+ stableAim:{id:"stableAim",name:"Stable Aim",coachingCue:"Keep aim calm",family:"stability",behavior:"continuous",weight:2,motion:{relation:"independent",leftSpeed:.8,rightSpeed:.07,response:1.85,turn:.24,changeMin:3000,changeMax:4400},left:{job:"active movement",band:[.52,.74],diagonalChance:.08},right:{job:"hold aim steady",band:[.26,.31],horizontal:{mode:"free",min:-.04,max:.04},vertical:{profile:"neutralTight",jitterChance:0}}},
+ stableMovement:{id:"stableMovement",name:"Stable Movement",coachingCue:"Keep movement calm",family:"stability",behavior:"continuous",weight:2,motion:{relation:"independent",leftSpeed:.07,rightSpeed:.82,response:2.8,turn:.44,changeMin:2400,changeMax:3500},left:{job:"stable movement",band:[.48,.56],diagonalChance:.04},right:{job:"active aim",band:[.24,.46],horizontal:{mode:"free",min:-.2,max:.2},vertical:{profile:"balanced",jitterChance:0}}},
+ pressureUnderMotion:{id:"pressureUnderMotion",name:"Pressure Under Motion",coachingCue:"Hold aim pressure",family:"pressure",behavior:"continuous",weight:2,motion:{relation:"independent",leftSpeed:.88,rightSpeed:.07,response:2.3,turn:.55,changeMin:1550,changeMax:2200},left:{job:"changing movement",band:[.48,.76],diagonalChance:.14},right:{job:"stable off-center aim",band:[.58,.66],horizontal:{mode:"free",min:-.07,max:.07},vertical:{profile:"neutralTight",jitterChance:0}}},
+ pressureUnderAim:{id:"pressureUnderAim",name:"Pressure Under Aim",coachingCue:"Hold movement pressure",family:"pressure",behavior:"continuous",weight:2,motion:{relation:"independent",leftSpeed:.07,rightSpeed:.88,response:2.8,turn:.55,changeMin:1550,changeMax:2200},left:{job:"stable off-center movement",band:[.7,.8],diagonalChance:.03},right:{job:"changing aim",band:[.25,.52],horizontal:{mode:"free",min:-.22,max:.22},vertical:{profile:"balanced",jitterChance:0}}},
+ controlledEntry:{id:"controlledEntry",name:"Controlled Entry",coachingCue:"Enter smoothly",family:"control",behavior:"continuous",weight:2,motion:{relation:"independent",leftSpeed:.75,rightSpeed:.64,response:2.8,turn:.32,changeMin:2200,changeMax:3100,entryMs:2400,entryFloor:.05},left:{job:"smooth movement entry",band:[.44,.7],diagonalChance:.08},right:{job:"smooth aim entry",band:[.24,.45],horizontal:{mode:"free",min:-.17,max:.17},vertical:{profile:"balanced",jitterChance:0}}},
+ controlledExit:{id:"controlledExit",name:"Controlled Exit",coachingCue:"Exit smoothly",family:"control",behavior:"continuous",weight:2,motion:{relation:"independent",leftSpeed:.77,rightSpeed:.66,response:3,turn:.45,changeMin:1900,changeMax:2750,decelerateMs:1250,decelerateFloor:.08},left:{job:"controlled movement exit",band:[.47,.72],diagonalChance:.08},right:{job:"controlled aim exit",band:[.24,.45],horizontal:{mode:"free",min:-.17,max:.17},vertical:{profile:"balanced",jitterChance:0}}},
+ settle:{id:"settle",name:"Settle",coachingCue:"Land softly",family:"control",behavior:"continuous",weight:2,motion:{relation:"independent",leftSpeed:.72,rightSpeed:.61,response:2.6,turn:.36,changeMin:2200,changeMax:3100,settleZone:.5,settleFloor:.07},left:{job:"soft movement landing",band:[.43,.72],diagonalChance:.08},right:{job:"soft aim landing",band:[.22,.47],horizontal:{mode:"free",min:-.17,max:.17},vertical:{profile:"balanced",jitterChance:0}}},
+ thumbSeparation:{id:"thumbSeparation",name:"Thumb Separation",coachingCue:"Separate the sticks",family:"separation",behavior:"continuous",weight:2,motion:{relation:"independent",leftSpeed:.86,rightSpeed:.34,response:3,turn:.65,changeMin:1550,changeMax:2200,rightChangeScale:1.9},left:{job:"wide movement path",band:[.64,.82],diagonalChance:.18},right:{job:"separate aim path",band:[.19,.35],horizontal:{mode:"free",min:-.17,max:.17},vertical:{profile:"balanced",jitterChance:0}}},
+ recover:{id:"recover",name:"Recover",coachingCue:"Recover smoothly",family:"recovery",behavior:"continuous",weight:2,motion:{relation:"independent",path:"recover",cycleMs:4200,overshoot:.32,recoverAt:.46,pathResponse:5.3,pathEntryMs:850,leftSpeed:.75,rightSpeed:.64,response:3.2,turn:.38,changeMin:2200,changeMax:3000},left:{job:"recover movement path",band:[.47,.72],diagonalChance:.08},right:{job:"recover aim path",band:[.24,.45],horizontal:{mode:"free",min:-.17,max:.17},vertical:{profile:"balanced",jitterChance:0}}},
+ commit:{id:"commit",name:"Commit",coachingCue:"Commit",family:"pressure",behavior:"continuous",weight:2,motion:{relation:"independent",path:"pressure",pressurePattern:"commit",cycleMs:4100,pathResponse:5.8,pathEntryMs:850,leftSpeed:.77,rightSpeed:.66,response:3.4,turn:.24,changeMin:2200,changeMax:3000},left:{job:"confident movement pressure",band:[.32,.8],diagonalChance:.05},right:{job:"confident aim pressure",band:[.16,.48],horizontal:{mode:"free",min:-.14,max:.14},vertical:{profile:"neutralTight",jitterChance:0}}},
+ pressureChange:{id:"pressureChange",name:"Pressure Change",coachingCue:"Change pressure",family:"pressure",behavior:"continuous",weight:2,motion:{relation:"independent",path:"pressure",pressurePattern:"wave",cycleMs:4200,pathResponse:5.3,pathEntryMs:850,leftSpeed:.64,rightSpeed:.55,response:3,turn:.22,changeMin:2400,changeMax:3200},left:{job:"changing movement pressure",band:[.25,.8],diagonalChance:.06},right:{job:"changing aim pressure",band:[.12,.48],horizontal:{mode:"free",min:-.14,max:.14},vertical:{profile:"balanced",jitterChance:0}}},
+ pressureRelease:{id:"pressureRelease",name:"Pressure Release",coachingCue:"Release smoothly",family:"release",behavior:"continuous",weight:2,motion:{relation:"independent",path:"pressure",pressurePattern:"release",cycleMs:6000,pathResponse:5,pathEntryMs:850,leftSpeed:.6,rightSpeed:.51,response:2.8,turn:.2,changeMin:3000,changeMax:4000},left:{job:"gradual movement release",band:[.22,.82],diagonalChance:.05},right:{job:"gradual aim release",band:[.1,.5],horizontal:{mode:"free",min:-.14,max:.14},vertical:{profile:"neutralTight",jitterChance:0}}},
+ pressureLadder:{id:"pressureLadder",name:"Pressure Ladder",coachingCue:"Climb pressure",family:"ladder",behavior:"continuous",weight:2,motion:{relation:"independent",path:"pressure",pressurePattern:"ladder",cycleMs:5500,pathResponse:5.3,pathEntryMs:850,leftSpeed:.62,rightSpeed:.53,response:3,turn:.18,changeMin:2800,changeMax:3700},left:{job:"movement pressure levels",band:[.22,.82],diagonalChance:.05},right:{job:"aim pressure levels",band:[.1,.5],horizontal:{mode:"free",min:-.14,max:.14},vertical:{profile:"neutralTight",jitterChance:0}}},
+ arcTracking:{id:"arcTracking",name:"Arc Tracking",coachingCue:"Follow the curve",family:"curve",behavior:"continuous",weight:2,motion:{relation:"independent",path:"arc",cycleMs:6500,arcSpan:1.4,pathResponse:5.3,pathEntryMs:950,leftSpeed:.68,rightSpeed:.6,response:3,turn:.3,changeMin:2600,changeMax:3500},left:{job:"smooth movement arc",band:[.55,.76],diagonalChance:.12},right:{job:"smooth aim arc",band:[.27,.47],horizontal:{mode:"free",min:-.17,max:.17},vertical:{profile:"balanced",jitterChance:0}}},
+ angleHold:{id:"angleHold",name:"Angle Hold",coachingCue:"Hold the angle",family:"angle",behavior:"continuous",weight:2,motion:{relation:"same",path:"angleHold",cycleMs:5000,pathResponse:5.3,pathEntryMs:850,leftSpeed:.6,rightSpeed:.51,response:3.2,turn:.12,changeMin:3200,changeMax:4300},left:{job:"fixed movement angle",band:[.38,.78],diagonalChance:.28},right:{job:"natural aim response",band:[.22,.45],horizontal:{mode:"same",followChance:.88,min:.09,max:.18},vertical:{profile:"balanced",jitterChance:0}}},
+ movementPriority:{id:"movementPriority",name:"Movement Priority",coachingCue:"Move first",family:"priority",behavior:"continuous",weight:2,motion:{relation:"same",priority:"left",cycleMs:4700,pathResponse:5.3,pathEntryMs:950,leftSpeed:.9,rightSpeed:.42,response:2.4,turn:.6,changeMin:1650,changeMax:2350,offset:.08},left:{job:"driving movement",band:[.56,.78],diagonalChance:.14},right:{job:"adapting aim",band:[.22,.4],horizontal:{mode:"same",followChance:.86,min:.09,max:.17},vertical:{profile:"balanced",jitterChance:0}}},
+ aimPriority:{id:"aimPriority",name:"Aim Priority",coachingCue:"Aim first",family:"priority",behavior:"continuous",weight:2,motion:{relation:"same",priority:"right",cycleMs:4700,pathResponse:5.3,pathEntryMs:950,leftSpeed:.42,rightSpeed:.9,response:2.4,turn:.6,changeMin:1650,changeMax:2350,offset:-.08},left:{job:"adapting movement",band:[.45,.65],diagonalChance:.1},right:{job:"driving aim",band:[.3,.52],horizontal:{mode:"free",min:-.2,max:.2},vertical:{profile:"balanced",jitterChance:0}}},
+ independentTiming:{id:"independentTiming",name:"Independent Timing",coachingCue:"One then the other",family:"timing",behavior:"continuous",weight:2,motion:{relation:"independent",path:"timing",cycleMs:6100,leadFraction:.21,pathResponse:5.3,pathEntryMs:1100,leftSpeed:.68,rightSpeed:.68,response:3,turn:.38,changeMin:2400,changeMax:3300,alternateRoles:true},left:{job:"leading movement timing",band:[.5,.74],diagonalChance:.12},right:{job:"following aim timing",band:[.25,.47],horizontal:{mode:"free",min:-.17,max:.17},vertical:{profile:"balanced",jitterChance:0}}}
 };
 const COMBAT_SCENARIO_BY_ID=Object.fromEntries(COMBAT_SCENARIOS.map(entry=>[entry.id,entry]));
 const COMBAT_SCENARIO_ALIASES={smg:"pressureHold",shotgun:"stableMovement",micro:"microCorrections",reset:"stableAim",mixed:"mixed"};
@@ -1097,14 +1134,67 @@ function endMechanicTrace(reason){
 }
 
 function activeCombatMotion(mechanic=activeCombatMechanic()){
- const motion=mechanic.motion;
- if(!motion.alternateRoles||!S.combatRoleSwap)return motion;
- return{...motion,leftSpeed:motion.rightSpeed,rightSpeed:motion.leftSpeed};
+ const baseMotion=mechanic.motion;
+ const motion=baseMotion.alternateRoles&&S.combatRoleSwap
+  ?{...baseMotion,leftSpeed:baseMotion.rightSpeed,rightSpeed:baseMotion.leftSpeed}
+  :baseMotion;
+ const profile=combatDifficultyProfile();
+ const speedScale=combatDifficultyUses(mechanic,"motionSpeed")?profile.motionSpeed:1;
+ const directionScale=combatDifficultyUses(mechanic,"directionChangeRate")?profile.directionChangeRate:1;
+ const independence=combatDifficultyUses(mechanic,"independenceAmount")?profile.independenceAmount:1;
+ const responseScale=Math.sqrt(speedScale);
+ const tuned={
+  ...motion,
+  leftSpeed:motion.leftSpeed*speedScale,
+  rightSpeed:motion.rightSpeed*speedScale,
+  response:motion.response*responseScale,
+  changeMin:motion.changeMin/directionScale,
+  changeMax:motion.changeMax/directionScale,
+  turn:motion.turn*(.7+independence*.3)
+ };
+ if(motion.cycleMs)tuned.cycleMs=motion.cycleMs/((speedScale+directionScale)/2);
+ if(motion.pathResponse)tuned.pathResponse=motion.pathResponse*responseScale;
+ if(motion.pathEntryMs)tuned.pathEntryMs=motion.pathEntryMs/responseScale;
+ if(mechanic.family==="hold"&&combatDifficultyUses(mechanic,"outerPressureChance")){
+  const holdScale=1+(profile.outerPressureChance-.35)*.3;
+  tuned.changeMin*=holdScale;
+  tuned.changeMax*=holdScale;
+ }
+ if(motion.phaseOffset)tuned.phaseOffset=motion.phaseOffset*independence;
+ if(motion.leadFraction)tuned.leadFraction=motion.leadFraction*independence;
+ if(motion.rightChangeScale)tuned.rightChangeScale=Math.pow(motion.rightChangeScale,independence);
+ if(motion.relation==="counter")tuned.counterOffset=.16*independence;
+ if((motion.relation==="counter"||motion.relation==="opposite")&&independence!==1){
+  tuned.offset=(motion.offset||0)+Math.sign(independence-1)*Math.min(.05,Math.abs(independence-1)*.08);
+ }
+ if(motion.relation==="independent"||motion.priority){
+  const separationExponent=1+(independence-1)*.35;
+  const geometricSpeed=Math.sqrt(Math.max(.0001,tuned.leftSpeed*tuned.rightSpeed));
+  tuned.leftSpeed=geometricSpeed*Math.pow(tuned.leftSpeed/geometricSpeed,separationExponent);
+  tuned.rightSpeed=geometricSpeed*Math.pow(tuned.rightSpeed/geometricSpeed,separationExponent);
+ }
+ return tuned;
 }
 
 function combatBandForSide(mechanic,side){
- if(mechanic.motion.alternateBands&&S.combatRoleSwap)return mechanic[side==="left"?"right":"left"].band;
- return mechanic[side].band;
+ const source=mechanic.motion.alternateBands&&S.combatRoleSwap
+  ?mechanic[side==="left"?"right":"left"]
+  :mechanic[side];
+ const band=source.band;
+ const profile=combatDifficultyProfile();
+ if(!combatDifficultyUses(mechanic,"pathRange"))return band;
+
+ const center=(band[0]+band[1])/2;
+ const baseSpan=band[1]-band[0];
+ const pressurePath=mechanic.motion.path==="pressure";
+ const rangeScale=pressurePath?profile.pathRange:1+(profile.pathRange-1)*.65;
+ const outerShift=combatDifficultyUses(mechanic,"outerPressureChance")&&!pressurePath
+  ?(profile.outerPressureChance-.35)*.12
+  :0;
+ const halfSpan=baseSpan*rangeScale/2;
+ const min=Math.max(.05,center+outerShift-halfSpan);
+ const max=Math.min(.88,center+outerShift+halfSpan);
+ return[min,max];
 }
 
 function combatMotionSpeedScale(body,band,motion,now){
@@ -1132,25 +1222,25 @@ function smoothCombatStep(value){
  return clamped*clamped*(3-2*clamped);
 }
 
-function combatPressureProgress(pattern,phase){
+function combatPressureProgress(pattern,phase,outerPressureChance=.35){
+ let progress;
  if(pattern==="commit"){
-  if(phase<.25)return smoothCombatStep(phase/.25);
-  if(phase<.72)return 1;
-  return 1-smoothCombatStep((phase-.72)/.28);
- }
- if(pattern==="release"){
-  if(phase<.8)return 1-smoothCombatStep(phase/.8);
-  return smoothCombatStep((phase-.8)/.2);
- }
- if(pattern==="ladder"){
+  if(phase<.25)progress=smoothCombatStep(phase/.25);
+  else if(phase<.72)progress=1;
+  else progress=1-smoothCombatStep((phase-.72)/.28);
+ }else if(pattern==="release"){
+  progress=phase<.8?1-smoothCombatStep(phase/.8):smoothCombatStep((phase-.8)/.2);
+ }else if(pattern==="ladder"){
   const levels=[0,.34,.67,1,.67,.34];
   const position=phase*levels.length;
   const index=Math.floor(position)%levels.length;
   const previous=levels[(index+levels.length-1)%levels.length];
   const local=position-index;
-  return local<.42?previous+(levels[index]-previous)*smoothCombatStep(local/.42):levels[index];
+  progress=local<.42?previous+(levels[index]-previous)*smoothCombatStep(local/.42):levels[index];
+ }else{
+  progress=.5-Math.cos(phase*Math.PI*2)*.5;
  }
- return .5-Math.cos(phase*Math.PI*2)*.5;
+ return Math.pow(clampNumber(progress,0,1),1-outerPressureChance*.25);
 }
 
 function combatPathRadius(band,progress){
@@ -1183,7 +1273,9 @@ function combatParameterizedTargets(mechanic,motion,now,leftBand,rightBand){
  };
 
  if(path==="pressure"){
-  const pressure=combatPressureProgress(motion.pressurePattern,phase);
+  const profile=combatDifficultyProfile();
+  const outerPressureChance=combatDifficultyUses(mechanic,"outerPressureChance")?profile.outerPressureChance:.35;
+  const pressure=combatPressureProgress(motion.pressurePattern,phase,outerPressureChance);
   return withSmoothEntry({
    left:combatPathPoint(leftAnchor,combatPathRadius(leftBand,pressure)),
    right:combatPathPoint(rightAnchor,combatPathRadius(rightBand,pressure))
@@ -1515,6 +1607,7 @@ function clearActiveDrillState(options={}){
  S.scenarioLeft={x:0,y:0,vx:0,vy:0,targetVx:0,targetVy:0,speed:0,targetX:0,targetY:0,nextChange:0};
  S.scenarioRight={x:0,y:0,vx:0,vy:0,targetVx:0,targetVy:0,speed:0,targetX:0,targetY:0,nextChange:0,nextJump:0};
  S.combatRoleSwap=false;
+ S.currentCombatMechanicId=null;
  S.scenarioMotionStartedAt=0;
  S.scenarioName="";
  S.weaponStyle="";
@@ -1533,6 +1626,12 @@ function clearActiveDrillState(options={}){
   const strip=$("sequenceStrip");
   if(prompt)prompt.innerHTML="";
   if(strip)strip.innerHTML="";
+  $("stickModeBanner")?.classList.add("hidden");
+  $("combatCueLabel")?.classList.add("hidden");
+  $("combatPromptBadge")?.classList.add("hidden");
+  if($("stickModeBanner"))$("stickModeBanner").textContent="";
+  if($("combatCueLabel"))$("combatCueLabel").textContent="";
+  if($("combatPromptBadge"))$("combatPromptBadge").textContent="";
  }
 }
 
@@ -1811,8 +1910,7 @@ function newRound(){
   S.stickTargets[1].distance=Math.hypot(S.scenarioRight.x,S.scenarioRight.y);
   {
   const motion=activeCombatMotion(mechanic);
-   const trackingSpeed=+$('trackingSpeed').value||.75;
-   const baseMovementSpeed=.11+trackingSpeed*.09;
+   const baseMovementSpeed=.11+1.78*.09;
    const movementSpeed=baseMovementSpeed*motion.leftSpeed;
    const aimSpeed=baseMovementSpeed*motion.rightSpeed;
    const movementAngle=(movementDirection<0?Math.PI:0)+(Math.random()-.5)*.45;
@@ -2460,7 +2558,7 @@ function updateGameScenarioTargets(now){
   const baseGuideX=(left.x+left.vx*leadSeconds)*relationSign;
   const baseGuideY=(left.y+left.vy*leadSeconds)*relationSign;
   const guideAngle=Math.atan2(baseGuideY,baseGuideX)+offset;
-  const counterOffset=motion.relation==="counter"?.16:0;
+  const counterOffset=motion.relation==="counter"?(motion.counterOffset||.16):0;
   const guideX=Math.cos(guideAngle)+Math.cos(guideAngle+Math.PI/2)*counterOffset;
   const guideY=Math.sin(guideAngle)+Math.sin(guideAngle+Math.PI/2)*counterOffset;
   const guideDistance=Math.hypot(guideX,guideY)||1;
@@ -2514,12 +2612,14 @@ function checkSticks(gp,now){
 
  if(isContinuousTrackingMode()){
   const radius=+$("trackingTargetSize").value;
+  const combatProfile=S.mode==="gamescenario"?combatDifficultyProfile():null;
+  const combatToleranceScale=combatProfile?.trackingTolerance||1;
   const lt=S.stickTargets[0],rt=S.stickTargets[1];
   const lp={x:Math.cos(lt.angle*Math.PI/180)*lt.distance,y:Math.sin(lt.angle*Math.PI/180)*lt.distance};
   const rp={x:Math.cos(rt.angle*Math.PI/180)*rt.distance,y:Math.sin(rt.angle*Math.PI/180)*rt.distance};
-  const leftRadius=S.mode==="gamescenario"?+$("leftStickLeniency").value:
+  const leftRadius=S.mode==="gamescenario"?+$("leftStickLeniency").value*COMBAT_TRACKING_TOLERANCE_SCALE*combatToleranceScale:
    S.mode==="strafeaim"?Math.max(.17,radius*1.45):radius;
-  const rightRadius=S.mode==="gamescenario"?Math.max(.07,radius*.78):
+  const rightRadius=S.mode==="gamescenario"?Math.max(.065,radius*.78*COMBAT_TRACKING_TOLERANCE_SCALE)*combatToleranceScale:
    S.mode==="strafeaim"?Math.max(.07,radius*.85):radius;
   const arenaSize=$("sharedArena")?.getBoundingClientRect().width||700;
   const leftZone=$("leftTargetZone"),rightZone=$("rightTargetZone");
@@ -2780,13 +2880,14 @@ function stopSession(){
  if(!S.running)return;
  finalizeSessionScore();
  clearTrails();S.running=false;S.paused=false;
+ clearActiveDrillState({resetController:false,resetPromptUi:true,resetChallengePreset:false});
  if(S.challengeMode){finalizeChallengeResults();return}
  S.lifeSessions++;persist();render();updateCoach();showReport();
 }
 function showReport(){
  let total=S.hits+S.misses,acc=total?Math.round(S.hits/total*100):100;
  let duration=Math.max(1,(performance.now()-S.sessionStart)/60000),avgApm=Math.round(S.sessionInputs/duration);
- $("reportScore").textContent=formatWholeNumber(S.sessionScore);$("reportPeak").textContent=S.peakApm;$("reportAccuracy").textContent=acc+"%";
+ $("reportScore").textContent=formatWholeNumber(S.sessionScore);$("reportAccuracy").textContent=acc+"%";
  $("reportPace").textContent=formatWholeNumber(avgApm);$("reportCombo").textContent=S.longestCombo;$("reportOnTarget").textContent=formatOnTargetReport();
  $("reportRecommendation").textContent=$("coachText").textContent;
  if(S.challengeMode){
