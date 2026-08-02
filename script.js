@@ -26,7 +26,8 @@ const S={
  peakApm:0,inputTimes:[],transitionTimes:[],buttonStats:saved.buttonStats||{},
  transitionStats:saved.transitionStats||{},lastInputAt:null,lastButton:null,
  hesitations:0,recoveryTimes:[],lastMissAt:null,stickTargets:[],holdStart:null,
- dualStickHoldLocked:false,successWindow:[],lifeSessions:saved.lifeSessions||0,lifeInputs:saved.lifeInputs||0,
+ dualStickHoldLocked:false,dualStickCompletionLocked:false,dualStickNextPairAt:0,
+ dualStickWaitingForRelease:false,dualStickPendingReleaseTargets:[],successWindow:[],lifeSessions:saved.lifeSessions||0,lifeInputs:saved.lifeInputs||0,
  trackingStart:0,trackingEnd:0,trackingOnTargetMs:0,trackingLastFrame:0,
  trackingPhaseLeft:0,trackingPhaseRight:Math.PI,trackingWanderLeft:{x:0,y:0,vx:.2,vy:.15},
  trackingWanderRight:{x:0,y:0,vx:-.15,vy:.2},
@@ -59,7 +60,13 @@ const S={
  challengeFallbackAt:0,
  challengeDurationSec:10,
  challengeScenarioPreset:null,
- challengeSessionFinalized:false
+ challengeSessionFinalized:false,
+ simultaneousButtonArmed:true,
+ simultaneousButtonFirstPressAt:0,
+ simultaneousButtonFirstPressButton:null,
+ simultaneousButtonWaitingForRelease:false,
+ simultaneousButtonReleaseButtons:[],
+ simultaneousButtonRearmAt:0
 };
 
 function currentNames(){return S.layout==="playstation"?PS_NAME:XBOX_NAME}
@@ -374,7 +381,11 @@ function loadV8Settings(){
  try{
   settings=JSON.parse(localStorage.getItem(V8_SETTINGS_KEY)||"null");
  }catch(_){ }
- if(!settings)return;
+ if(!settings){
+  S.challengeMode=true;
+  S.mode="challenge";
+  return true;
+ }
 
  if(settings.sessionDurationMinutes!==undefined&&!settings.sessionDurationUnit){
   const raw=Number(settings.sessionDurationMinutes);
@@ -385,9 +396,16 @@ function loadV8Settings(){
   }
  }
 
- if(settings.activeMode&&document.querySelector(`[data-mode="${settings.activeMode}"]`)){
-  S.mode=settings.activeMode;
-  document.querySelectorAll(".nav").forEach(button=>button.classList.toggle("active",button.dataset.mode===S.mode));
+ const savedMode=settings.activeMode;
+ const hasValidMode=savedMode&&document.querySelector(`[data-mode="${savedMode}"]`);
+ if(hasValidMode){
+  S.mode=savedMode;
+  S.challengeMode=savedMode==="challenge";
+  document.querySelectorAll(".nav").forEach(button=>button.classList.toggle("active",S.challengeMode?button.dataset.mode==="challenge":button.dataset.mode===S.mode));
+ }else{
+  S.challengeMode=true;
+  S.mode="challenge";
+  document.querySelectorAll(".nav").forEach(button=>button.classList.toggle("active",button.dataset.mode==="challenge"));
  }
  for(const [id,value] of Object.entries(settings)){
   if(id==="activeMode")continue;
@@ -405,6 +423,7 @@ function loadV8Settings(){
  const left=$("leftStickColor")?.value||DEFAULT_LEFT_STICK_COLOR;
  const right=$("rightStickColor")?.value||DEFAULT_RIGHT_STICK_COLOR;
  applyStickColors(left,right,false);
+ return !hasValidMode || savedMode==="challenge";
 }
 
 function bindV8Settings(){
@@ -954,6 +973,24 @@ function newRound(){
  else if(S.mode==="endurance")S.seq=generateSequence(Math.max(6,len));
  else S.seq=generateSequence(len);
  S.full=[...S.seq];
+ if(S.mode==="dualsticks"){
+  S.dualStickCompletionLocked=false;
+  S.dualStickNextPairAt=0;
+  S.dualStickWaitingForRelease=false;
+  S.dualStickPendingReleaseTargets=[];
+  S.holdStart=null;
+ }else if(S.mode==="simultaneous"){
+  S.simultaneousButtonArmed=!S.simultaneousButtonWaitingForRelease && !S.simultaneousButtonRearmAt;
+  S.simultaneousButtonFirstPressAt=0;
+  S.simultaneousButtonFirstPressButton=null;
+ }else{
+  S.simultaneousButtonArmed=true;
+  S.simultaneousButtonFirstPressAt=0;
+  S.simultaneousButtonFirstPressButton=null;
+  S.simultaneousButtonWaitingForRelease=false;
+  S.simultaneousButtonReleaseButtons=[];
+  S.simultaneousButtonRearmAt=0;
+ }
  S.start=performance.now();
  S.roundLimit=effectiveLimit();
  const untimedStatic=S.infiniteSession&&["dualsticks","strafeaim"].includes(S.mode);
@@ -1070,6 +1107,14 @@ function completeRound(){
  S.successWindow.push(true);
  if(S.mode==="dualsticks"||S.mode==="strafeaim")S.challenge.dual100++;
  recordChallengeOutcome(activeChallengeEntryKey(),true);
+ if(S.mode==="simultaneous"){
+  S.simultaneousButtonReleaseButtons=[...S.seq];
+  S.simultaneousButtonWaitingForRelease=true;
+  S.simultaneousButtonArmed=false;
+  S.simultaneousButtonFirstPressAt=0;
+  S.simultaneousButtonFirstPressButton=null;
+  S.simultaneousButtonRearmAt=now+140;
+ }
  updateChallenges();
  tone(true);persist();updateUI();
  if(S.challengeMode){
@@ -1094,7 +1139,10 @@ function completeDualStickPair(now){
  S.successWindow.push(true);
  S.challenge.dual100++;
  recordChallengeOutcome(activeChallengeEntryKey(),true);
- S.stickTargets=[makeStickTarget("ls"),makeStickTarget("rs")];
+ S.dualStickCompletionLocked=true;
+ S.dualStickNextPairAt=now+240;
+ S.dualStickWaitingForRelease=true;
+ S.dualStickPendingReleaseTargets=[...S.stickTargets];
  S.holdStart=null;
  S.dualStickHoldLocked=true;
  updateChallenges();
@@ -1124,6 +1172,39 @@ function handlePress(b){
  if(S.paused||["sticks","dualsticks","strafeaim","dualtrack","reactivetrack","gamescenario"].includes(S.mode))return;
  let now=performance.now();registerInputTimestamp(now);
  if(S.mode==="simultaneous"){
+  if(S.simultaneousButtonWaitingForRelease){
+   const stillHeld=S.simultaneousButtonReleaseButtons.some(button=>S.pair.has(button));
+   if(stillHeld)return;
+   if(now<S.simultaneousButtonRearmAt)return;
+   S.simultaneousButtonWaitingForRelease=false;
+   S.simultaneousButtonReleaseButtons=[];
+   S.simultaneousButtonRearmAt=0;
+  }
+  if(S.simultaneousButtonRearmAt&&now<S.simultaneousButtonRearmAt)return;
+  if(!S.simultaneousButtonArmed){
+   if(S.simultaneousButtonFirstPressAt&&now-S.simultaneousButtonFirstPressAt>120){
+    S.simultaneousButtonFirstPressAt=0;
+    S.simultaneousButtonFirstPressButton=null;
+    S.simultaneousButtonArmed=true;
+   }
+   if(S.seq.includes(b)&&S.simultaneousButtonFirstPressAt===0){
+    S.simultaneousButtonFirstPressAt=now;
+    S.simultaneousButtonFirstPressButton=b;
+    S.simultaneousButtonArmed=false;
+    S.pair.add(b);
+    return;
+   }
+   if(S.seq.includes(b)&&S.simultaneousButtonFirstPressAt>0&&now-S.simultaneousButtonFirstPressAt<=120&&b!==S.simultaneousButtonFirstPressButton){
+    S.pair.add(b);
+    if(S.seq.every(x=>S.pair.has(x))){
+     for(const x of S.seq)recordButton(x,true,now-S.start);
+     completeRound();
+    }
+    return;
+   }
+   if(!S.seq.includes(b)){recordButton(b,false,0);failRound();return}
+   return;
+  }
   S.pair.add(b);
   if(S.seq.every(x=>S.pair.has(x))){
    for(const x of S.seq)recordButton(x,true,now-S.start);
@@ -1504,6 +1585,44 @@ function checkSticks(gp,now){
  let leftOn=leftTarget?targetMatch(leftTarget,lx,ly):true;
  let rightOn=rightTarget?targetMatch(rightTarget,rx,ry):true;
  updateArenaClarity(leftOn,rightOn);
+ if(S.mode==="dualsticks"){
+  if(S.dualStickCompletionLocked){
+   if(now>=S.dualStickNextPairAt){
+    const pendingTargets=S.dualStickPendingReleaseTargets||[];
+    const pendingLeft=pendingTargets.find(t=>t.side==="ls");
+    const pendingRight=pendingTargets.find(t=>t.side==="rs");
+    const leftReleased=!pendingLeft||!targetMatch(pendingLeft,lx,ly);
+    const rightReleased=!pendingRight||!targetMatch(pendingRight,rx,ry);
+    S.dualStickCompletionLocked=false;
+    S.dualStickNextPairAt=0;
+    S.dualStickWaitingForRelease=!(leftReleased&&rightReleased);
+    S.dualStickPendingReleaseTargets=leftReleased&&rightReleased?[]:pendingTargets;
+    S.stickTargets=[makeStickTarget("ls"),makeStickTarget("rs")];
+    S.holdStart=null;
+    S.dualStickHoldLocked=!leftReleased||!rightReleased;
+    if(S.dualStickWaitingForRelease){render();return}
+    render();
+    return;
+   }else{
+    S.holdStart=null;
+    return;
+   }
+  }
+  if(S.dualStickWaitingForRelease){
+   const pendingTargets=S.dualStickPendingReleaseTargets||[];
+   const pendingLeft=pendingTargets.find(t=>t.side==="ls");
+   const pendingRight=pendingTargets.find(t=>t.side==="rs");
+   const leftReleased=!pendingLeft||!targetMatch(pendingLeft,lx,ly);
+   const rightReleased=!pendingRight||!targetMatch(pendingRight,rx,ry);
+   if(!(leftReleased&&rightReleased)){
+    S.holdStart=null;
+    return;
+   }
+   S.dualStickWaitingForRelease=false;
+   S.dualStickPendingReleaseTargets=[];
+   S.dualStickHoldLocked=false;
+  }
+ }
  let all=leftOn&&rightOn;
  if(all){
   if(S.mode==="dualsticks"){
@@ -1865,7 +1984,7 @@ $("hideOnTargetToggle").checked=false;
 $("stickOffsetSlider").value="0";
 $("stickOffsetValue").textContent="0";
 loadStickColors();
-loadV8Settings();
+const startupUsesChallenge=loadV8Settings();
 bindV8Settings();
 updateChallengeDurationLabel();
 setLayout($("layoutSelect").value||"xbox");
@@ -1873,6 +1992,7 @@ applyDifficulty(+$("trainingDifficulty").value||3,false);
 updateContextualSettings();
 applyTrainingLayout();
 updateModeSelectionUI();
+if(startupUsesChallenge && !S.running){beginChallengeMode();}
 updateUI();
 render();
 requestAnimationFrame(frame);
