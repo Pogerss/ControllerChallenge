@@ -952,7 +952,7 @@ function clearActiveDrillState(options={}){
  S.continuousModeLastFrame=0;
  S.trackingWasOnTarget=false;
  S.trackingHitSoundAt=0;
- clearSimultaneousButtonsRuntimeState();
+ if(!options.preserveSimultaneousReleaseGate)clearSimultaneousButtonsRuntimeState();
  if(options.resetChallengePreset!==false)S.challengeScenarioPreset=null;
  if(options.resetController!==false)resetControllerState();
  clearTrails();
@@ -1131,7 +1131,8 @@ function updateContinuousTargets(now){
 function newRound(){
  if(!S.running||S.paused)return;
  S.trackingWasOnTarget=false;
- clearActiveDrillState({resetController:true,resetPromptUi:true});
+ const preserveSimultaneousReleaseGate=S.mode==="simultaneous"&&S.simultaneousButtonWaitingForRelease;
+ clearActiveDrillState({resetController:true,resetPromptUi:true,preserveSimultaneousReleaseGate});
  let len=+$("sequenceLength").value;
  if(S.challengeMode){
   S.challengeSwitchPending=false;
@@ -1225,6 +1226,13 @@ function newRound(){
  S.full=[...S.seq];
  if(["sequence","simultaneous"].includes(S.mode)){
   resetControllerState(getButtonStateSnapshot());
+  if(S.mode==="simultaneous"){
+   S.simultaneousButtonArmed=!S.simultaneousButtonWaitingForRelease;
+   S.simultaneousButtonFirstPressAt=0;
+   S.simultaneousButtonFirstPressButton=null;
+   S.simultaneousButtonRearmAt=0;
+   S.simultaneousButtonConfirmationUntil=0;
+  }
  }else if(S.mode==="dualsticks"){
   S.dualStickCompletionLocked=false;
   S.dualStickNextPairAt=0;
