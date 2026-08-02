@@ -64,6 +64,9 @@ const S={
  challengeType:"full",
  challengeScenarioPreset:null,
  challengeFocusSnapToken:0,
+ challengePreviousFocusFamily:null,
+ challengeCurrentFocusFamily:null,
+ challengeFirstScenarioSnapPending:true,
  challengeSessionFinalized:false,
  simultaneousButtonArmed:true,
  simultaneousButtonFirstPressAt:0,
@@ -689,21 +692,31 @@ function challengeStageFocusFallback(){
  return document.querySelector("#trainerPanel .controller-and-stick");
 }
 
-function challengeFocusTargetForEntry(entry=S.challengeCurrentMode||S.mode){
- const mode=challengeEntryMeta(entry).mode;
- if(mode==="sequence"||mode==="simultaneous"){
-  return document.querySelector("#trainerPanel .controller-and-stick")||challengeStageFocusFallback();
- }
- if(mode==="sticks"){
-  return document.querySelector("#stickTargets .shared-arena-shell")||challengeStageFocusFallback();
- }
- if(mode==="dualsticks"){
-  return document.querySelector("#trainerPanel .controller-and-stick")||challengeStageFocusFallback();
- }
- if(["strafeaim","dualtrack","reactivetrack","gamescenario"].includes(mode)){
-  return document.querySelector("#stickTargets .shared-arena-shell")||challengeStageFocusFallback();
- }
+function challengeFocusTargetForFamily(family){
+ if(family==="buttons")return document.querySelector("#trainerPanel .controller-and-stick")||challengeStageFocusFallback();
+ if(family==="sticks")return document.querySelector("#trainerPanel .controller-and-stick")||challengeStageFocusFallback();
+ if(family==="tracking"||family==="combat")return document.querySelector("#stickTargets .shared-arena-shell")||challengeStageFocusFallback();
  return challengeStageFocusFallback();
+}
+
+function challengeFocusTargetForEntry(entry=S.challengeCurrentMode||S.mode){
+ return challengeFocusTargetForFamily(challengeFocusGroupForEntry(entry));
+}
+
+function challengeFocusGroupForEntry(entry=S.challengeCurrentMode||S.mode){
+ const mode=challengeEntryMeta(entry).mode;
+ if(mode==="sequence"||mode==="simultaneous")return"buttons";
+ if(mode==="sticks"||mode==="dualsticks"||mode==="strafeaim")return"sticks";
+ if(mode==="dualtrack"||mode==="reactivetrack")return"tracking";
+ if(mode==="gamescenario")return"combat";
+ return"other";
+}
+
+function resetChallengeSnapState(){
+ S.challengeFocusSnapToken++;
+ S.challengePreviousFocusFamily=null;
+ S.challengeCurrentFocusFamily=null;
+ S.challengeFirstScenarioSnapPending=true;
 }
 
 function focusChallengeScenario(target,snapToken){
@@ -719,11 +732,19 @@ function focusChallengeScenario(target,snapToken){
  window.scrollTo({top:nextTop,left:window.scrollX,behavior:"auto"});
 }
 
-function queueChallengeFocusSnap(){
+function queueChallengeFocusSnap(nextEntry=S.challengeCurrentMode||S.mode){
  if(!S.challengeMode||!S.running||S.challengeSessionFinalized)return;
  if(!$('summaryModal')?.classList.contains('hidden'))return;
- const target=challengeFocusTargetForEntry();
+ const nextFamily=challengeFocusGroupForEntry(nextEntry);
+ const previousFamily=S.challengeCurrentFocusFamily;
+ const target=challengeFocusTargetForFamily(nextFamily);
  if(!target)return;
+ const isFirstChallengeScenario=!!S.challengeFirstScenarioSnapPending;
+ const shouldSnap=isFirstChallengeScenario||previousFamily!==nextFamily;
+ S.challengeFirstScenarioSnapPending=false;
+ S.challengePreviousFocusFamily=previousFamily;
+ S.challengeCurrentFocusFamily=nextFamily;
+ if(!shouldSnap)return;
  const snapToken=++S.challengeFocusSnapToken;
  requestAnimationFrame(()=>requestAnimationFrame(()=>focusChallengeScenario(target,snapToken)));
 }
@@ -990,7 +1011,7 @@ function applyChallengeScenario(mode){
 function beginChallengeMode(){
  if(!S.challengeMode)return;
  clearActiveDrillState({resetController:true,resetPromptUi:true});
- S.challengeFocusSnapToken++;
+ resetChallengeSnapState();
  S.challengeCurrentMode=null;
  S.challengeScenarioPreset=null;
  S.challengeQueue=buildChallengeQueue();
@@ -1014,7 +1035,7 @@ function beginChallengeMode(){
  applyTrainingLayout();
  if(S.running&&!S.paused)newRound();
  else render();
- queueChallengeFocusSnap();
+ queueChallengeFocusSnap(S.challengeCurrentMode);
 }
 
 function challengeTargetForCurrentMode(){
@@ -1068,7 +1089,7 @@ function advanceChallengeMode(){
  applyTrainingLayout();
  newRound();
  render();
- queueChallengeFocusSnap();
+ queueChallengeFocusSnap(S.challengeCurrentMode);
  S.challengeTransitioning=false;
  S.challengeTransitionStartedAt=0;
 }
@@ -2007,7 +2028,7 @@ function pauseSession(){
 function finalizeChallengeResults(){
  if(!S.challengeMode||S.challengeSessionFinalized)return;
  S.challengeSessionFinalized=true;
- S.challengeFocusSnapToken++;
+ resetChallengeSnapState();
  S.challengeSwitchPending=false;
  S.challengeSwitchAt=null;
  S.challengeTransitioning=false;
@@ -2117,7 +2138,7 @@ function frame(now){
    $("trackingRoundFill").style.width="0%";
    $("trackingTimeRemaining").textContent=S.infiniteSession?"∞":"—";
   }
-  if(rem<=0&&!isContinuousTrackingMode()){
+  if(rem<=0&&!isContinuousTrackingMode()&&S.mode!=="dualsticks"){
    const silentStick=["sticks","dualsticks","strafeaim"].includes(S.mode);
    failRound({silent:silentStick});
   }
@@ -2168,6 +2189,7 @@ document.querySelectorAll(".nav").forEach(b=>b.onclick=()=>{
  S.challengeMode=false;
  S.challengeSwitchPending=false;
  S.challengeSwitchAt=null;
+ resetChallengeSnapState();
  S.challengeCurrentMode=null;
  S.challengeScenarioPreset=null;
  S.mode=b.dataset.mode;
