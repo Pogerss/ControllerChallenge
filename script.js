@@ -2893,9 +2893,7 @@ function frame(now){
  updateUI(now);requestAnimationFrame(frame);
 }
 
-window.addEventListener("gamepadconnected",handleGamepadConnected);
-window.addEventListener("gamepaddisconnected",handleGamepadDisconnected);
-
+function bindStartupEvents(){
 document.querySelectorAll(".nav").forEach(b=>b.onclick=()=>{
  endMechanicTrace("mode-change");
  const leavingStandaloneSimultaneous=!S.challengeMode&&S.mode==="simultaneous"&&!(b.dataset.mode==="simultaneous");
@@ -3019,7 +3017,10 @@ $("leftStickLeniency").onchange=()=>{if(S.running&&S.mode==="gamescenario")newRo
 $("angleTolerance").oninput=()=>$("angleToleranceValue").textContent=$("angleTolerance").value;
 $("distanceTolerance").oninput=()=>$("distanceToleranceValue").textContent=$("distanceTolerance").value;
 $("holdDuration").oninput=()=>$("holdDurationValue").textContent=$("holdDuration").value;
+}
 
+function initializeSettings(){
+bindStartupEvents();
 $("stickTrailsToggle").checked=false;
 $("dynamicFocusToggle").checked=false;
 $("hideOnTargetToggle").checked=false;
@@ -3033,12 +3034,66 @@ updateCombatPracticeDescription();
 updateChallengeDurationLabel();
 setLayout($("layoutSelect").value||"xbox");
 applyDifficulty(+$("trainingDifficulty").value||3,false);
+return startupUsesChallenge;
+}
+
+function initializeControllerPolling(){
+ window.addEventListener("gamepadconnected",handleGamepadConnected);
+ window.addEventListener("gamepaddisconnected",handleGamepadDisconnected);
+ const gamepad=getActiveGamepad();
+ if(!gamepad)return;
+ S.controllerIndex=gamepad.index;
+ S.controllerConnected=true;
+ S.controllerLabel=gamepad.id||"";
+ resetControllerState();
+ updateControllerStatus(true,S.controllerLabel||"Controller connected");
+}
+
+function initializeSessionState(startupUsesChallenge){
 updateContextualSettings();
 applyTrainingLayout();
 updateModeSelectionUI();
 if(startupUsesChallenge && !S.running){beginChallengeMode();}
 updateUI();
 render();
-requestAnimationFrame(frame);
+}
 
-window.addEventListener("beforeunload",saveV8Settings);
+let frameLoopStarted=false;
+function startFrameLoop(){
+ if(frameLoopStarted)return;
+ try{
+  frameLoopStarted=true;
+  requestAnimationFrame(frame);
+ }catch(error){
+  frameLoopStarted=false;
+  console.error("Frame loop failed to start",error);
+ }
+}
+
+function initializeApp(){
+ const requiredIds=["trainerPanel","timerFill","trackingRoundFill","trackingTimeRemaining","sessionDuration"];
+ const missingIds=requiredIds.filter(id=>!$(id));
+ if(missingIds.length)console.error("Missing required DOM element(s): "+missingIds.join(", "));
+
+ let startupUsesChallenge=false;
+ try{
+  startupUsesChallenge=initializeSettings();
+ }catch(error){
+  console.error("Settings initialization failed",error);
+ }
+ try{
+  initializeControllerPolling();
+ }catch(error){
+  console.error("Controller polling failed to initialize",error);
+ }
+ try{
+  initializeSessionState(startupUsesChallenge);
+ }catch(error){
+  console.error("Session initialization failed",error);
+ }
+ startFrameLoop();
+ window.addEventListener("beforeunload",saveV8Settings);
+}
+
+if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",initializeApp,{once:true});
+else initializeApp();
