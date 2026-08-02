@@ -66,7 +66,8 @@ const S={
  simultaneousButtonFirstPressButton:null,
  simultaneousButtonWaitingForRelease:false,
  simultaneousButtonReleaseButtons:[],
- simultaneousButtonRearmAt:0
+ simultaneousButtonRearmAt:0,
+ simultaneousButtonConfirmationUntil:0
 };
 
 function currentNames(){return S.layout==="playstation"?PS_NAME:XBOX_NAME}
@@ -92,8 +93,23 @@ function updateControllerStatus(connected,label){
  }
 }
 
-function resetControllerState(){
+function getButtonStateSnapshot(){
+ const gp=getActiveGamepad();
+ const snapshot=new Map();
+ for(const b of BUTTONS)snapshot.set(b,!!gp?.buttons[b]?.pressed);
+ return snapshot;
+}
+
+function resetControllerState(initialButtonState=null){
  S.prev=new Map();
+ if(initialButtonState){
+  for(const b of BUTTONS){
+   const pressed=initialButtonState instanceof Map?initialButtonState.get(b):!!initialButtonState[b];
+   S.prev.set(b,!!pressed);
+  }
+ }else{
+  for(const b of BUTTONS)S.prev.set(b,false);
+ }
  S.pair=new Set();
  S.lastButton=null;
  S.holdStart=null;
@@ -384,6 +400,7 @@ function loadV8Settings(){
  if(!settings){
   S.challengeMode=true;
   S.mode="challenge";
+  document.querySelectorAll(".nav").forEach(button=>button.classList.toggle("active",button.dataset.mode==="challenge"));
   return true;
  }
 
@@ -403,6 +420,11 @@ function loadV8Settings(){
   S.challengeMode=savedMode==="challenge";
   document.querySelectorAll(".nav").forEach(button=>button.classList.toggle("active",S.challengeMode?button.dataset.mode==="challenge":button.dataset.mode===S.mode));
  }else{
+  S.challengeMode=true;
+  S.mode="challenge";
+  document.querySelectorAll(".nav").forEach(button=>button.classList.toggle("active",button.dataset.mode==="challenge"));
+ }
+ if(S.mode!=="challenge" && settings.activeMode===undefined){
   S.challengeMode=true;
   S.mode="challenge";
   document.querySelectorAll(".nav").forEach(button=>button.classList.toggle("active",button.dataset.mode==="challenge"));
@@ -973,7 +995,9 @@ function newRound(){
  else if(S.mode==="endurance")S.seq=generateSequence(Math.max(6,len));
  else S.seq=generateSequence(len);
  S.full=[...S.seq];
- if(S.mode==="dualsticks"){
+ if(["sequence","simultaneous"].includes(S.mode)){
+  resetControllerState(getButtonStateSnapshot());
+ }else if(S.mode==="dualsticks"){
   S.dualStickCompletionLocked=false;
   S.dualStickNextPairAt=0;
   S.dualStickWaitingForRelease=false;
@@ -983,6 +1007,7 @@ function newRound(){
   S.simultaneousButtonArmed=!S.simultaneousButtonWaitingForRelease && !S.simultaneousButtonRearmAt;
   S.simultaneousButtonFirstPressAt=0;
   S.simultaneousButtonFirstPressButton=null;
+  S.simultaneousButtonConfirmationUntil=0;
  }else{
   S.simultaneousButtonArmed=true;
   S.simultaneousButtonFirstPressAt=0;
@@ -990,6 +1015,7 @@ function newRound(){
   S.simultaneousButtonWaitingForRelease=false;
   S.simultaneousButtonReleaseButtons=[];
   S.simultaneousButtonRearmAt=0;
+  S.simultaneousButtonConfirmationUntil=0;
  }
  S.start=performance.now();
  S.roundLimit=effectiveLimit();
@@ -1113,7 +1139,8 @@ function completeRound(){
   S.simultaneousButtonArmed=false;
   S.simultaneousButtonFirstPressAt=0;
   S.simultaneousButtonFirstPressButton=null;
-  S.simultaneousButtonRearmAt=now+140;
+  S.simultaneousButtonRearmAt=0;
+  S.simultaneousButtonConfirmationUntil=now+220;
  }
  updateChallenges();
  tone(true);persist();updateUI();
@@ -1172,13 +1199,14 @@ function handlePress(b){
  if(S.paused||["sticks","dualsticks","strafeaim","dualtrack","reactivetrack","gamescenario"].includes(S.mode))return;
  let now=performance.now();registerInputTimestamp(now);
  if(S.mode==="simultaneous"){
+  if(S.simultaneousButtonConfirmationUntil&&now<S.simultaneousButtonConfirmationUntil)return;
   if(S.simultaneousButtonWaitingForRelease){
    const stillHeld=S.simultaneousButtonReleaseButtons.some(button=>S.pair.has(button));
    if(stillHeld)return;
    if(now<S.simultaneousButtonRearmAt)return;
    S.simultaneousButtonWaitingForRelease=false;
    S.simultaneousButtonReleaseButtons=[];
-   S.simultaneousButtonRearmAt=0;
+   S.simultaneousButtonRearmAt=now+150;
   }
   if(S.simultaneousButtonRearmAt&&now<S.simultaneousButtonRearmAt)return;
   if(!S.simultaneousButtonArmed){
