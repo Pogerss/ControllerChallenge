@@ -12,7 +12,7 @@
     <div class="brand">
       <div class="brand-mark">RC</div>
       <div>
-        <h1>Roller Challenge <span>v8.2</span></h1>
+        <h1>Roller Challenge <span>v10</span></h1>
         <p>APM · Accuracy · Coordination</p>
       </div>
     </div>
@@ -24,10 +24,19 @@
 
   <div class="workspace">
     <aside class="sidebar panel">
-      <div class="mode-group">
+      <div class="mode-group challenge-options">
         <div class="section-title">Challenge</div>
-        <button class="nav active" data-mode="challenge">
-          <span>Challenge Mode</span><small>Auto-rotate through the drills</small>
+        <button class="nav active" data-mode="challenge" data-challenge-type="full">
+          <span>Full Challenge</span><small>Mixed training</small>
+        </button>
+        <button class="nav" data-mode="challenge" data-challenge-type="combat">
+          <span>Combat Challenge</span><small>Weapon styles and combat concepts</small>
+        </button>
+        <button class="nav" data-mode="challenge" data-challenge-type="stick">
+          <span>Stick Challenge</span><small>Stick targets and moving drills</small>
+        </button>
+        <button class="nav" data-mode="challenge" data-challenge-type="button">
+          <span>Button Challenge</span><small>Button chains and simultaneous inputs</small>
         </button>
       </div>
 
@@ -63,7 +72,7 @@
           <span>Reactive Tracking</span><small>Read and react to changes</small>
         </button>
         <button class="nav" data-mode="gamescenario">
-          <span>Combat Movement</span><small>Strafe rhythm with active aim control</small>
+          <span>Combat</span><small>Strafe rhythm with active aim control</small>
         </button>
       </div>
 
@@ -217,7 +226,7 @@
           </div>
 
           <div id="stickTargets" class="stick-targets shared-stick-workspace hidden">
-            <div id="stickModeBanner" class="stick-mode-banner hidden">STICK TRAINING</div>
+            <div id="stickModeBanner" class="stick-mode-banner hidden">Combat · — · —</div>
 
             <div id="dualFocusLabel" class="dual-focus-label hidden">
               <span class="left-key">LEFT STICK</span>
@@ -357,11 +366,14 @@
           <p class="settings-section-copy">Mode-specific controls adjust to the active drill.</p>
         </div>
         <div class="settings-section-body">
-          <div class="mode-setting challenge-settings" data-modes="challenge">
-            <div class="settings-section-heading">
-              <div class="section-title">Challenge Mode</div>
-              <p class="settings-section-copy">Let the existing drills flow together with a natural handoff every few seconds.</p>
-            </div>
+          <div id="challengeCurrentSummary" class="challenge-current-summary mode-setting" data-modes="challenge">
+            <div class="section-title">Challenge Summary</div>
+            <strong id="challengeCurrentTitle">Full Challenge</strong>
+            <small id="challengeCurrentLine1">Mixed buttons, sticks, tracking, and combat concepts.</small>
+            <small id="challengeCurrentLine2">Auto-rotates through the full pool.</small>
+          </div>
+
+          <div class="mode-setting challenge-settings hidden" data-modes="challenge">
             <label class="field">Duration
               <input id="challengeDuration" type="range" min="7" max="15" value="10">
               <small id="challengeDurationValue">10s</small>
@@ -495,12 +507,9 @@
               <div class="mode-setting" data-modes="gamescenario">
                 <label class="field">Scenario
                   <select id="gameScenarioType">
-                    <option value="mixed" selected>Mixed combat</option>
-                    <option value="smg">SMG tracking</option>
-                    <option value="shotgun">Shotgun peeks</option>
-                    <option value="micro">Micro strafes</option>
-                    <option value="reset">Reset and re-center</option>
+                    <option value="mixed" selected>Random combat</option>
                   </select>
+                  <small id="combatPracticeDescription" class="scenario-note"></small>
                 </label>
 
                 <label class="field">Movement amount

@@ -35,7 +35,7 @@ const S={
  reactiveRight:{x:0,y:0,vx:0,vy:0,nextChange:0,nextJump:0,pauseUntil:0},
  scenarioLeft:{x:0,y:0,targetX:0,nextChange:0},
  scenarioRight:{x:0,y:0,vx:0,vy:0,nextChange:0,nextJump:0},
- scenarioName:"",scenarioLeftOnMs:0,scenarioRightOnMs:0,
+ scenarioName:"",weaponStyle:"",conceptName:"",scenarioLeftOnMs:0,scenarioRightOnMs:0,
  challenge:saved.challenge||{accuracy100:0,combo50:0,apm300:0,dual100:0},
  leftTrailPoints:[],rightTrailPoints:[],leftOnTarget:false,rightOnTarget:false,
  strafeAimLeft:{x:0,targetX:0,nextChange:0},
@@ -51,6 +51,8 @@ const S={
  challengeCurrentMode:null,
  challengeCompletedModes:[],
  challengeModeStats:{},
+ combatStylesPracticed:[],
+ combatConceptsPracticed:[],
  challengeSwitchPending:false,
  challengeSwitchAt:null,
  challengeTransitioning:false,
@@ -59,7 +61,9 @@ const S={
  challengeTargetCount:1,
  challengeFallbackAt:0,
  challengeDurationSec:10,
+ challengeType:"full",
  challengeScenarioPreset:null,
+ challengeFocusSnapToken:0,
  challengeSessionFinalized:false,
  simultaneousButtonArmed:true,
  simultaneousButtonFirstPressAt:0,
@@ -166,6 +170,7 @@ function applyTrainingLayout(){
  const stickFocused=choice==="sticks"||(choice==="auto"&&isStickHeavyMode());
  const trackingFocused=stickFocused&&isContinuousTrackingMode();
  const trainer=$("trainerPanel");
+ trainer.classList.toggle("challenge-active",S.challengeMode);
  trainer.classList.toggle("stick-focused",stickFocused);
  trainer.classList.toggle("button-focused",!stickFocused);
  trainer.classList.toggle("tracking-focused",trackingFocused);
@@ -305,6 +310,16 @@ function clearTrails(){
  if($("rightTrail"))$("rightTrail").innerHTML="";
 }
 
+function clearSimultaneousButtonsRuntimeState(){
+ S.simultaneousButtonArmed=true;
+ S.simultaneousButtonFirstPressAt=0;
+ S.simultaneousButtonFirstPressButton=null;
+ S.simultaneousButtonWaitingForRelease=false;
+ S.simultaneousButtonReleaseButtons=[];
+ S.simultaneousButtonRearmAt=0;
+ S.simultaneousButtonConfirmationUntil=0;
+}
+
 function updateArenaClarity(leftOn,rightOn){
  S.leftOnTarget=!!leftOn;
  S.rightOnTarget=!!rightOn;
@@ -377,7 +392,7 @@ function applyDifficulty(level,updateControls=true){
 }
 
 function collectV8Settings(){
- const settings={activeMode:S.mode,sessionDurationUnit:"seconds"};
+ const settings={activeMode:S.challengeMode?"challenge":S.mode,challengeType:challengeTypeKey(),sessionDurationUnit:"seconds"};
  for(const id of V8_SETTING_IDS){
   const element=$(id);
   if(!element)continue;
@@ -400,7 +415,7 @@ function loadV8Settings(){
  if(!settings){
   S.challengeMode=true;
   S.mode="challenge";
-  document.querySelectorAll(".nav").forEach(button=>button.classList.toggle("active",button.dataset.mode==="challenge"));
+  S.challengeType="full";
   return true;
  }
 
@@ -415,25 +430,26 @@ function loadV8Settings(){
 
  const savedMode=settings.activeMode;
  const hasValidMode=savedMode&&document.querySelector(`[data-mode="${savedMode}"]`);
+ S.challengeType=challengeTypeKey(settings.challengeType);
  if(hasValidMode){
   S.mode=savedMode;
   S.challengeMode=savedMode==="challenge";
-  document.querySelectorAll(".nav").forEach(button=>button.classList.toggle("active",S.challengeMode?button.dataset.mode==="challenge":button.dataset.mode===S.mode));
  }else{
   S.challengeMode=true;
   S.mode="challenge";
-  document.querySelectorAll(".nav").forEach(button=>button.classList.toggle("active",button.dataset.mode==="challenge"));
+  S.challengeType="full";
  }
  if(S.mode!=="challenge" && settings.activeMode===undefined){
   S.challengeMode=true;
   S.mode="challenge";
-  document.querySelectorAll(".nav").forEach(button=>button.classList.toggle("active",button.dataset.mode==="challenge"));
+  S.challengeType="full";
  }
  for(const [id,value] of Object.entries(settings)){
-  if(id==="activeMode")continue;
+  if(id==="activeMode"||id==="challengeType")continue;
   const element=$(id);
   if(!element)continue;
   if(element.type==="checkbox")element.checked=!!value;
+  else if(id==="gameScenarioType")element.value=resolveCombatScenarioId(String(value));
   else element.value=String(value);
  }
 
@@ -639,7 +655,7 @@ function render(){
 }
 
 const MODE_HINTS={
- challenge:"Challenge Mode settings",
+ challenge:"Challenge settings",
  sequence:"Button sequence settings",
  simultaneous:"Simultaneous button settings",
  sticks:"Single-stick settings",
@@ -647,25 +663,196 @@ const MODE_HINTS={
  strafeaim:"Strafe and aim settings",
  dualtrack:"Dual-tracking settings",
  reactivetrack:"Reactive-tracking settings",
- gamescenario:"Combat movement settings"
+ gamescenario:"Combat settings"
 };
-const CHALLENGE_MODE_POOL=["sequence","simultaneous","sticks","dualsticks","strafeaim","dualtrack","reactivetrack","gamescenario-smg","gamescenario-shotgun","gamescenario-micro","gamescenario-reset","gamescenario-mixed"];
+const CHALLENGE_TYPE_DEFS={
+ full:{label:"Full Challenge",summary:["Mixed buttons, sticks, tracking, and combat concepts.","Auto-rotates through the full pool."],categories:["button","stick","combat"]},
+ combat:{label:"Combat Challenge",summary:["Weapon styles and transferable stick-control concepts.","Rotates through the combat concept set."],categories:["combat"]},
+ stick:{label:"Stick Challenge",summary:["Stick placement, tension, tracking, and coordinated movement.","Pairs single-stick and dual-stick work."],categories:["stick"]},
+ button:{label:"Button Challenge",summary:["Sequences, simultaneous inputs, timing, and release control.","Focuses on button-only execution."],categories:["button"]}
+};
+
+function challengeTypeKey(type){
+ return CHALLENGE_TYPE_DEFS[type]?type:"full";
+}
+
+function challengeTypeMeta(type=S.challengeType){
+ return CHALLENGE_TYPE_DEFS[challengeTypeKey(type)];
+}
+
+function challengeEntriesForType(type=S.challengeType){
+ const meta=challengeTypeMeta(type);
+ return CHALLENGE_MODE_POOL.filter(entry=>meta.categories.includes(challengeEntryCategory(entry)));
+}
+
+function challengeStageFocusFallback(){
+ return document.querySelector("#trainerPanel .controller-and-stick");
+}
+
+function challengeFocusTargetForEntry(entry=S.challengeCurrentMode||S.mode){
+ const mode=challengeEntryMeta(entry).mode;
+ if(mode==="sequence"||mode==="simultaneous"){
+  return document.querySelector("#trainerPanel .controller-and-stick")||challengeStageFocusFallback();
+ }
+ if(mode==="sticks"){
+  return document.querySelector("#stickTargets .shared-arena-shell")||challengeStageFocusFallback();
+ }
+ if(mode==="dualsticks"){
+  return document.querySelector("#trainerPanel .controller-and-stick")||challengeStageFocusFallback();
+ }
+ if(["strafeaim","dualtrack","reactivetrack","gamescenario"].includes(mode)){
+  return document.querySelector("#stickTargets .shared-arena-shell")||challengeStageFocusFallback();
+ }
+ return challengeStageFocusFallback();
+}
+
+function focusChallengeScenario(target,snapToken){
+ if(!target||snapToken!==S.challengeFocusSnapToken)return;
+ if(!S.challengeMode||!S.running||S.challengeSessionFinalized)return;
+ if(!$('summaryModal')?.classList.contains('hidden'))return;
+ const rect=target.getBoundingClientRect();
+ const viewportHeight=window.innerHeight||document.documentElement.clientHeight||0;
+ if(!viewportHeight||rect.height<=0)return;
+ const desiredTop=Math.max(72,Math.round(viewportHeight*0.18));
+ const currentTop=window.scrollY+rect.top;
+ const nextTop=Math.max(0,currentTop-desiredTop);
+ window.scrollTo({top:nextTop,left:window.scrollX,behavior:"auto"});
+}
+
+function queueChallengeFocusSnap(){
+ if(!S.challengeMode||!S.running||S.challengeSessionFinalized)return;
+ if(!$('summaryModal')?.classList.contains('hidden'))return;
+ const target=challengeFocusTargetForEntry();
+ if(!target)return;
+ const snapToken=++S.challengeFocusSnapToken;
+ requestAnimationFrame(()=>requestAnimationFrame(()=>focusChallengeScenario(target,snapToken)));
+}
+
+function combatEntryWeight(entry){
+ return COMBAT_WEAPON_STYLE_WEIGHTS[challengeEntryMeta(entry)?.weaponStyle]||1;
+}
+
+function weightedCombatPick(candidates){
+ const combatCandidates=candidates.filter(entry=>challengeEntryCategory(entry)==="combat");
+ if(!combatCandidates.length)return null;
+ const total=combatCandidates.reduce((sum,entry)=>sum+combatEntryWeight(entry),0);
+ let threshold=Math.random()*total;
+ for(const entry of combatCandidates){
+  threshold-=combatEntryWeight(entry);
+  if(threshold<=0)return entry;
+ }
+ return combatCandidates[combatCandidates.length-1];
+}
+
+function updateChallengeTypeSummary(){
+ const panel=$("challengeCurrentSummary");
+ if(!panel)return;
+ panel.classList.toggle("hidden",!S.challengeMode);
+ if(!S.challengeMode)return;
+ const meta=challengeTypeMeta();
+ const title=$("challengeCurrentTitle");
+ if(title)title.textContent=meta.label;
+ ["challengeCurrentLine1","challengeCurrentLine2"].forEach((id,index)=>{
+  const line=$(id);
+  if(line)line.textContent=meta.summary[index]||"";
+ });
+}
+
+function setChallengeType(type,options={}){
+ S.challengeType=challengeTypeKey(type);
+ updateChallengeTypeSummary();
+ updateModeSelectionUI();
+ saveV8Settings();
+ if(S.challengeMode&&options.restart!==false&&S.running){
+  beginChallengeMode();
+  return;
+ }
+ if(S.challengeMode)render();
+}
+
+const COMBAT_SCENARIOS=[
+ {id:"mirror",label:"AR — Mirror",weaponStyle:"AR",conceptName:"Mirror",description:"Match the movement relationship while keeping controlled stick tension.",mode:"gamescenario",profile:"mirror"},
+ {id:"antiMirror",label:"LMG — Anti-Mirror",weaponStyle:"LMG",conceptName:"Anti-Mirror",description:"Counter the movement relationship with deliberate opposite aim pressure.",mode:"gamescenario",profile:"antiMirror"},
+ {id:"oppositePush",label:"SMG — Opposite Push",weaponStyle:"SMG",conceptName:"Opposite Push",description:"Push the movement and aim sticks against each other.",mode:"gamescenario",profile:"oppositePush"},
+ {id:"sameSidePush",label:"Shotgun — Same-Side Push",weaponStyle:"Shotgun",conceptName:"Same-Side Push",description:"Keep both sticks applying pressure in a related direction.",mode:"gamescenario",profile:"sameSidePush"},
+ {id:"microCorrections",label:"Pistol — Micro Corrections",weaponStyle:"Pistol",conceptName:"Micro Corrections",description:"Use small right-stick adjustments while maintaining stable movement.",mode:"gamescenario",profile:"microCorrections"},
+ {id:"wideCorrections",label:"LMG — Wide Corrections",weaponStyle:"LMG",conceptName:"Wide Corrections",description:"Use larger right-stick travel and broader target movement.",mode:"gamescenario",profile:"wideCorrections"},
+ {id:"centerHold",label:"Marksman — Center Hold",weaponStyle:"Marksman",conceptName:"Center Hold",description:"Maintain stable tension near a central position.",mode:"gamescenario",profile:"centerHold"},
+ {id:"pressureHold",label:"AR — Pressure Hold",weaponStyle:"AR",conceptName:"Pressure Hold",description:"Maintain sustained off-center stick tension without drifting.",mode:"gamescenario",profile:"pressureHold"},
+ {id:"lead",label:"Sniper — Lead",weaponStyle:"Sniper",conceptName:"Lead",description:"Aim slightly ahead of the target's movement path.",mode:"gamescenario",profile:"lead"},
+ {id:"follow",label:"Pistol — Follow",weaponStyle:"Pistol",conceptName:"Follow",description:"Let the aim follow the target's current path smoothly.",mode:"gamescenario",profile:"follow"}
+];
+const COMBAT_SCENARIO_BY_ID=Object.fromEntries(COMBAT_SCENARIOS.map(entry=>[entry.id,entry]));
+const COMBAT_WEAPON_STYLE_WEIGHTS={SMG:5,AR:5,Pistol:4,Shotgun:3,Marksman:2,LMG:1,Sniper:1};
+const COMBAT_SCENARIO_ALIASES={smg:"pressureHold",shotgun:"sameSidePush",micro:"microCorrections",reset:"centerHold",mixed:"mixed"};
+
+function resolveCombatScenarioId(value){
+ return COMBAT_SCENARIO_ALIASES[value]||value||"mixed";
+}
+
+function getCombatScenarioEntry(value){
+ const scenarioId=resolveCombatScenarioId(value);
+ return COMBAT_SCENARIO_BY_ID[scenarioId]||null;
+}
+
+function getCombatScenarioProfile(value){
+ return getCombatScenarioEntry(value)?.profile||"mixed";
+}
+
+function setCombatScenarioOptions(){
+ const select=$("gameScenarioType");
+ if(!select)return;
+ const currentValue=resolveCombatScenarioId(select.value);
+ const options=[
+  {value:"mixed",label:"Random combat"},
+  ...COMBAT_SCENARIOS.map(entry=>({value:entry.id,label:entry.label}))
+ ];
+ select.innerHTML=options.map(option=>`<option value="${option.value}">${option.label}</option>`).join("");
+ select.value=options.some(option=>option.value===currentValue)?currentValue:"mixed";
+}
+
+function updateCombatPracticeDescription(){
+ const description=$("combatPracticeDescription");
+ if(!description)return;
+ const entry=getCombatScenarioEntry($("gameScenarioType")?.value);
+ description.textContent=entry?.description||"";
+}
+
+function getCombatScenarioDescriptor(){
+ if(S.mode==="strafeaim"){
+  const style=($("aimTargetStyle")?.value)||"mixed";
+  const conceptName={mixed:"Pressure Hold",fine:"Micro Corrections",outer:"Wide Corrections"}[style]||"Pressure Hold";
+  return{weaponStyle:"AR",conceptName};
+ }
+ if(S.mode==="dualtrack"){
+  const pattern=($("trackingPattern")?.value)||"wander";
+  const conceptName={circle:"Mirror",figure8:"Anti-Mirror",opposite:"Opposite Push",wander:"Follow"}[pattern]||"Follow";
+  return{weaponStyle:"LMG",conceptName};
+ }
+ if(S.mode==="reactivetrack"){
+  const intensity=($("reactiveIntensity")?.value)||"standard";
+  const conceptName={easy:"Follow",standard:"Lead",hard:"Pressure Hold"}[intensity]||"Lead";
+  return{weaponStyle:"SMG",conceptName};
+ }
+ if(S.mode==="gamescenario"){
+  const entry=getCombatScenarioEntry(S.scenarioName||S.challengeScenarioPreset||($("gameScenarioType")?.value));
+  return entry?{weaponStyle:entry.weaponStyle,conceptName:entry.conceptName}:{weaponStyle:"AR",conceptName:"Follow"};
+ }
+ return{weaponStyle:"",conceptName:""};
+}
+const CHALLENGE_MODE_POOL=["sequence","simultaneous","sticks","dualsticks","strafeaim","dualtrack","reactivetrack",...COMBAT_SCENARIOS.map(entry=>entry.id)];
 
 function challengeEntryMeta(entry){
- if(entry==="gamescenario-smg")return{mode:"gamescenario",label:"Combat Movement — SMG",scenario:"smg"};
- if(entry==="gamescenario-shotgun")return{mode:"gamescenario",label:"Combat Movement — Shotgun",scenario:"shotgun"};
- if(entry==="gamescenario-micro")return{mode:"gamescenario",label:"Combat Movement — Micro",scenario:"micro"};
- if(entry==="gamescenario-reset")return{mode:"gamescenario",label:"Combat Movement — Reset",scenario:"reset"};
- if(entry==="gamescenario-mixed")return{mode:"gamescenario",label:"Combat Movement — Mixed",scenario:"mixed"};
- const labels={sequence:"Sequence",simultaneous:"Simultaneous Buttons",sticks:"Single Stick",dualsticks:"Simultaneous Sticks",strafeaim:"Strafe + Aim",dualtrack:"Dual Tracking",reactivetrack:"Reactive Tracking",gamescenario:"Combat Movement"};
- return{mode:entry,label:labels[entry]||entry,scenario:null};
+ const combatEntry=getCombatScenarioEntry(entry);
+ if(combatEntry)return{mode:combatEntry.mode,label:`${combatEntry.weaponStyle} — ${combatEntry.conceptName}`,scenario:combatEntry.id,challengeCategory:"combat",weaponStyle:combatEntry.weaponStyle,conceptName:combatEntry.conceptName};
+ const labels={sequence:"Sequence",simultaneous:"Simultaneous Buttons",sticks:"Single Stick",dualsticks:"Simultaneous Sticks",strafeaim:"Strafe + Aim",dualtrack:"Dual Tracking",reactivetrack:"Reactive Tracking",gamescenario:"Combat"};
+ return{mode:entry,label:labels[entry]||entry,scenario:null,challengeCategory:challengeEntryCategory(entry)};
 }
 
 function challengeEntryCategory(entry){
  if(entry==="sequence"||entry==="simultaneous")return"button";
- if(entry==="sticks"||entry==="dualsticks"||entry==="strafeaim")return"discrete-stick";
- if(entry==="dualtrack"||entry==="reactivetrack")return"tracking";
- if(entry==="gamescenario"||entry==="gamescenario-smg"||entry==="gamescenario-shotgun"||entry==="gamescenario-micro"||entry==="gamescenario-reset"||entry==="gamescenario-mixed")return"combat";
+ if(entry==="sticks"||entry==="dualsticks"||entry==="strafeaim"||entry==="dualtrack"||entry==="reactivetrack")return"stick";
+ if(COMBAT_SCENARIO_BY_ID[entry]||entry==="gamescenario"||entry==="gamescenario-mixed")return"combat";
  return"other";
 }
 
@@ -681,38 +868,56 @@ function updateChallengeDurationLabel(){
 
 function updateModeSelectionUI(){
  document.querySelectorAll(".nav").forEach(button=>{
+  if(button.dataset.challengeType){
+   button.classList.toggle("active",S.challengeMode&&S.challengeType===button.dataset.challengeType);
+   return;
+  }
   const isChallenge=button.dataset.mode==="challenge";
   button.classList.toggle("active",S.challengeMode?isChallenge:button.dataset.mode===S.mode);
  });
 }
 
 function buildChallengeQueue(){
- const modes=[...CHALLENGE_MODE_POOL];
+ const modes=[...challengeEntriesForType()];
  const queue=[];
  let lastEntry=S.challengeCurrentMode||null;
  let lastCategory=lastEntry?challengeEntryCategory(lastEntry):null;
+ let lastCombatMeta=lastEntry?challengeEntryMeta(lastEntry):null;
+ const typeKey=challengeTypeKey();
  while(modes.length){
   let candidates=[...modes];
-  if($("challengeNoRepeatsToggle")?.checked!==false&&lastEntry){
+  if(lastEntry){
    candidates=candidates.filter(mode=>mode!==lastEntry);
   }
-  if(lastCategory&&candidates.length>1){
+  if(typeKey==="full"&&lastCategory&&candidates.length>1){
    const differentCategoryCandidates=candidates.filter(mode=>challengeEntryCategory(mode)!==lastCategory);
    if(differentCategoryCandidates.length){
     candidates=differentCategoryCandidates;
    }
   }
+  if(typeKey==="combat"&&lastCombatMeta&&candidates.length>1){
+    const differentStyleCandidates=candidates.filter(mode=>challengeEntryMeta(mode).weaponStyle!==lastCombatMeta.weaponStyle);
+    if(differentStyleCandidates.length)candidates=differentStyleCandidates;
+    const differentCombatCandidates=candidates.filter(mode=>{
+     const meta=challengeEntryMeta(mode);
+     return meta.weaponStyle!==lastCombatMeta.weaponStyle||meta.conceptName!==lastCombatMeta.conceptName;
+    });
+    if(differentCombatCandidates.length){
+     candidates=differentCombatCandidates;
+    }
+  }
   if(!candidates.length)candidates=[...modes];
-  const index=Math.floor(Math.random()*candidates.length);
-  const next=candidates[index];
+  let next=candidates[Math.floor(Math.random()*candidates.length)];
+  if(challengeEntryCategory(next)==="combat"){
+   const weightedCombat=weightedCombatPick(candidates);
+   if(weightedCombat)next=weightedCombat;
+  }
   queue.push(next);
   const poolIndex=modes.indexOf(next);
   if(poolIndex!==-1)modes.splice(poolIndex,1);
   lastEntry=next;
   lastCategory=challengeEntryCategory(lastEntry);
- }
- if($("challengeRandomModesToggle")?.checked===false){
-  return CHALLENGE_MODE_POOL.slice();
+  lastCombatMeta=challengeEntryMeta(lastEntry);
  }
  return queue;
 }
@@ -740,11 +945,14 @@ function clearActiveDrillState(options={}){
  S.scenarioLeft={x:0,y:0,targetX:0,nextChange:0};
  S.scenarioRight={x:0,y:0,vx:0,vy:0,nextChange:0,nextJump:0};
  S.scenarioName="";
+ S.weaponStyle="";
+ S.conceptName="";
  S.scenarioLeftOnMs=0;
  S.scenarioRightOnMs=0;
  S.continuousModeLastFrame=0;
  S.trackingWasOnTarget=false;
  S.trackingHitSoundAt=0;
+ clearSimultaneousButtonsRuntimeState();
  if(options.resetChallengePreset!==false)S.challengeScenarioPreset=null;
  if(options.resetController!==false)resetControllerState();
  clearTrails();
@@ -760,11 +968,12 @@ function applyChallengeScenario(mode){
  if(!S.challengeMode)return;
  if(mode==="gamescenario"){
   if(S.challengeScenarioPreset){
-   $("gameScenarioType").value=S.challengeScenarioPreset;
+   const preset=resolveCombatScenarioId(S.challengeScenarioPreset);
+   $("gameScenarioType").value=preset;
    return;
   }
   if($("challengeRandomScenariosToggle")?.checked===false)return;
-  const scenarios=["smg","shotgun","micro","reset","mixed"];
+  const scenarios=COMBAT_SCENARIOS.map(entry=>entry.id);
   $("gameScenarioType").value=scenarios[Math.floor(Math.random()*scenarios.length)];
   return;
  }
@@ -781,6 +990,9 @@ function applyChallengeScenario(mode){
 function beginChallengeMode(){
  if(!S.challengeMode)return;
  clearActiveDrillState({resetController:true,resetPromptUi:true});
+ S.challengeFocusSnapToken++;
+ S.challengeCurrentMode=null;
+ S.challengeScenarioPreset=null;
  S.challengeQueue=buildChallengeQueue();
  S.challengeCompletedModes=[];
  S.challengeModeStats={};
@@ -800,7 +1012,9 @@ function beginChallengeMode(){
  applyChallengeScenario(S.mode);
  updateContextualSettings();
  applyTrainingLayout();
- render();
+ if(S.running&&!S.paused)newRound();
+ else render();
+ queueChallengeFocusSnap();
 }
 
 function challengeTargetForCurrentMode(){
@@ -854,6 +1068,7 @@ function advanceChallengeMode(){
  applyTrainingLayout();
  newRound();
  render();
+ queueChallengeFocusSnap();
  S.challengeTransitioning=false;
  S.challengeTransitionStartedAt=0;
 }
@@ -867,19 +1082,29 @@ function recordChallengeOutcome(mode,ok){
  const entry=S.challengeModeStats[mode]||(S.challengeModeStats[mode]={rounds:0,successes:0,failures:0});
  entry.rounds++;
  if(ok)entry.successes++;else entry.failures++;
+ const meta=challengeEntryMeta(mode);
+ if(meta.challengeCategory==="combat"){
+  if(meta.weaponStyle&&!S.combatStylesPracticed.includes(meta.weaponStyle))S.combatStylesPracticed.push(meta.weaponStyle);
+  if(meta.conceptName&&!S.combatConceptsPracticed.includes(meta.conceptName))S.combatConceptsPracticed.push(meta.conceptName);
+ }
 }
 
 function updateChallengeSummary(){
  const summary=$("challengeSummary");
  if(!summary)return;
  if(!S.challengeMode){summary.classList.add("hidden");return}
+ const typeMeta=challengeTypeMeta();
  const entries=Object.entries(S.challengeModeStats).filter(([,stats])=>stats.rounds>0).map(([mode,stats])=>({mode,stats}));
- if(!entries.length){summary.textContent="Challenge Mode is active. Keep the flow moving and the next drill will appear automatically.";summary.classList.remove("hidden");return}
+ if(!entries.length){summary.textContent=`${typeMeta.label} is active. Keep the flow moving and the next drill will appear automatically.`;summary.classList.remove("hidden");return}
  const best=entries.slice().sort((a,b)=>(b.stats.successes/b.stats.rounds)-(a.stats.successes/a.stats.rounds)||b.stats.rounds-a.stats.rounds)[0];
  const needsPractice=entries.slice().sort((a,b)=>(a.stats.successes/a.stats.rounds)-(b.stats.successes/b.stats.rounds)||a.stats.rounds-b.stats.rounds)[0];
  const bestName=best?challengeEntryMeta(best.mode).label:"—";
  const needsPracticeName=needsPractice?challengeEntryMeta(needsPractice.mode).label:"—";
- summary.textContent=`Modes completed: ${S.challengeCompletedModes.length || entries.length}. Best mode: ${bestName}. Needs practice: ${needsPracticeName}.`;
+ const challengeLine=`${typeMeta.label}. Modes completed: ${S.challengeCompletedModes.length || entries.length}. Best mode: ${bestName}. Needs practice: ${needsPracticeName}.`;
+ const combatLine=S.challengeType==="combat"&&S.combatStylesPracticed.length
+  ?`Combat styles: ${S.combatStylesPracticed.join(", ")}. Concepts: ${S.combatConceptsPracticed.join(", ")}.`
+  :"";
+ summary.textContent=combatLine?`${challengeLine}\n${combatLine}`:challengeLine;
  summary.classList.remove("hidden");
 }
 
@@ -890,6 +1115,7 @@ function updateContextualSettings(){
   const modes=element.dataset.modes.split(",");
   element.classList.toggle("mode-hidden",!modes.includes(targetMode));
  });
+ updateChallengeTypeSummary();
  updateMovingModeDescription();
  updateChallengeDurationLabel();
 }
@@ -968,10 +1194,12 @@ function newRound(){
  }
  else if(S.mode==="gamescenario"){
   const now=performance.now();
-  const selected=$("gameScenarioType").value;
-  const choices=["smg","shotgun","micro","reset"];
-  const scenario=selected==="mixed"?choices[Math.floor(Math.random()*choices.length)]:selected;
+  const selected=resolveCombatScenarioId($("gameScenarioType").value);
+  const scenario=selected==="mixed"?COMBAT_SCENARIOS[Math.floor(Math.random()*COMBAT_SCENARIOS.length)].id:selected;
+  const entry=getCombatScenarioEntry(scenario);
   S.scenarioName=scenario;
+  S.weaponStyle=entry?.weaponStyle||"";
+  S.conceptName=entry?.conceptName||"";
   S.stickTargets=[
    {side:"ls",angle:0,distance:.28,role:"scenario-left"},
    {side:"rs",angle:180,distance:.38,role:"scenario-right"}
@@ -1003,19 +1231,8 @@ function newRound(){
   S.dualStickWaitingForRelease=false;
   S.dualStickPendingReleaseTargets=[];
   S.holdStart=null;
- }else if(S.mode==="simultaneous"){
-  S.simultaneousButtonArmed=!S.simultaneousButtonWaitingForRelease && !S.simultaneousButtonRearmAt;
-  S.simultaneousButtonFirstPressAt=0;
-  S.simultaneousButtonFirstPressButton=null;
-  S.simultaneousButtonConfirmationUntil=0;
  }else{
-  S.simultaneousButtonArmed=true;
-  S.simultaneousButtonFirstPressAt=0;
-  S.simultaneousButtonFirstPressButton=null;
-  S.simultaneousButtonWaitingForRelease=false;
-  S.simultaneousButtonReleaseButtons=[];
-  S.simultaneousButtonRearmAt=0;
-  S.simultaneousButtonConfirmationUntil=0;
+  clearSimultaneousButtonsRuntimeState();
  }
  S.start=performance.now();
  S.roundLimit=effectiveLimit();
@@ -1028,7 +1245,7 @@ const MOVING_MODE_DESCRIPTIONS={
  strafeaim:"Track continuously while matching a slower left-stick strafe target and a more precise right-stick aim target.",
  dualtrack:"Track two independently moving targets at the same time.",
  reactivetrack:"React to readable direction changes without target teleporting.",
- gamescenario:"Practice combat movement rhythm: deliberate left-stick strafes with active right-stick aim control."
+ gamescenario:"Practice Combat rhythm: deliberate left-stick strafes with active right-stick aim control."
 };
 
 let audioContext=null;
@@ -1140,7 +1357,7 @@ function completeRound(){
   S.simultaneousButtonFirstPressAt=0;
   S.simultaneousButtonFirstPressButton=null;
   S.simultaneousButtonRearmAt=0;
-  S.simultaneousButtonConfirmationUntil=now+220;
+  S.simultaneousButtonConfirmationUntil=0;
  }
  updateChallenges();
  tone(true);persist();updateUI();
@@ -1194,50 +1411,62 @@ function failRound(options={}){
  if(S.challengeMode&&S.challengeSwitchPending){advanceChallengeMode();return}
  newRound();
 }
+
+function updateSimultaneousButtonReleaseState(gp){
+ if(S.mode!=="simultaneous"||!S.simultaneousButtonWaitingForRelease)return;
+ const stillHeld=S.simultaneousButtonReleaseButtons.some(button=>!!gp?.buttons[button]?.pressed);
+ if(stillHeld)return;
+ S.simultaneousButtonWaitingForRelease=false;
+ S.simultaneousButtonReleaseButtons=[];
+ S.simultaneousButtonArmed=true;
+ S.simultaneousButtonFirstPressAt=0;
+ S.simultaneousButtonFirstPressButton=null;
+ S.simultaneousButtonRearmAt=0;
+ S.simultaneousButtonConfirmationUntil=0;
+}
+
 function handlePress(b){
- if(!S.running){if(b===9)startSession();return}
+ if(!S.running){
+  if(!$('summaryModal').classList.contains('hidden')&&b===1){
+   $('summaryModal').classList.add('hidden');
+   return;
+  }
+  if(b===9)startSession();
+  return;
+ }
  if(S.paused||["sticks","dualsticks","strafeaim","dualtrack","reactivetrack","gamescenario"].includes(S.mode))return;
  let now=performance.now();registerInputTimestamp(now);
  if(S.mode==="simultaneous"){
-  if(S.simultaneousButtonConfirmationUntil&&now<S.simultaneousButtonConfirmationUntil)return;
-  if(S.simultaneousButtonWaitingForRelease){
-   const stillHeld=S.simultaneousButtonReleaseButtons.some(button=>S.pair.has(button));
-   if(stillHeld)return;
-   if(now<S.simultaneousButtonRearmAt)return;
-   S.simultaneousButtonWaitingForRelease=false;
-   S.simultaneousButtonReleaseButtons=[];
-   S.simultaneousButtonRearmAt=now+150;
-  }
-  if(S.simultaneousButtonRearmAt&&now<S.simultaneousButtonRearmAt)return;
-  if(!S.simultaneousButtonArmed){
-   if(S.simultaneousButtonFirstPressAt&&now-S.simultaneousButtonFirstPressAt>120){
-    S.simultaneousButtonFirstPressAt=0;
-    S.simultaneousButtonFirstPressButton=null;
-    S.simultaneousButtonArmed=true;
-   }
-   if(S.seq.includes(b)&&S.simultaneousButtonFirstPressAt===0){
-    S.simultaneousButtonFirstPressAt=now;
-    S.simultaneousButtonFirstPressButton=b;
-    S.simultaneousButtonArmed=false;
-    S.pair.add(b);
-    return;
-   }
-   if(S.seq.includes(b)&&S.simultaneousButtonFirstPressAt>0&&now-S.simultaneousButtonFirstPressAt<=120&&b!==S.simultaneousButtonFirstPressButton){
-    S.pair.add(b);
-    if(S.seq.every(x=>S.pair.has(x))){
-     for(const x of S.seq)recordButton(x,true,now-S.start);
-     completeRound();
-    }
-    return;
-   }
-   if(!S.seq.includes(b)){recordButton(b,false,0);failRound();return}
+  if(S.simultaneousButtonWaitingForRelease)return;
+  if(!S.seq.includes(b)){recordButton(b,false,0);failRound();return}
+  if(S.simultaneousButtonArmed){
+   S.simultaneousButtonArmed=false;
+   S.simultaneousButtonFirstPressAt=now;
+   S.simultaneousButtonFirstPressButton=b;
+   S.pair.add(b);
    return;
   }
+  const firstPress=S.simultaneousButtonFirstPressAt;
+  const firstButton=S.simultaneousButtonFirstPressButton;
+  if(!firstPress){
+   S.simultaneousButtonFirstPressAt=now;
+   S.simultaneousButtonFirstPressButton=b;
+   S.pair.add(b);
+   return;
+  }
+  if(b===firstButton)return;
+  if(now-firstPress<=120){
+   S.pair.add(b);
+   if(S.seq.every(x=>S.pair.has(x))){
+    for(const x of S.seq)recordButton(x,true,now-S.start);
+    completeRound();
+   }
+   return;
+  }
+  S.simultaneousButtonFirstPressAt=now;
+  S.simultaneousButtonFirstPressButton=b;
+  S.pair.clear();
   S.pair.add(b);
-  if(S.seq.every(x=>S.pair.has(x))){
-   for(const x of S.seq)recordButton(x,true,now-S.start);
-   completeRound();
-  }else if(!S.seq.includes(b)){recordButton(b,false,0);failRound()}
   return;
  }
  let expected=S.seq[0],ok=b===expected;
@@ -1301,8 +1530,12 @@ function renderStickPrompt(){
  updateArenaClarity(false,false);
  $("sharedArena")?.classList.remove("both-on");
  let lt=S.stickTargets.find(t=>t.side==="ls"),rt=S.stickTargets.find(t=>t.side==="rs");
- $("stickModeBanner").classList.toggle("hidden",!["strafeaim","dualtrack","reactivetrack","gamescenario"].includes(S.mode));
- $("stickModeBanner").textContent=S.mode==="dualtrack"?"DUAL TRACKING":S.mode==="reactivetrack"?"REACTIVE DUAL TRACKING":S.mode==="gamescenario"?"GAME SCENARIO STICKS":"STRAFE + AIM";
+ const combatMode=["strafeaim","dualtrack","reactivetrack","gamescenario"].includes(S.mode);
+ const combatDescriptor=getCombatScenarioDescriptor();
+ S.weaponStyle=combatDescriptor.weaponStyle;
+ S.conceptName=combatDescriptor.conceptName;
+ $("stickModeBanner").classList.toggle("hidden",!combatMode);
+ $("stickModeBanner").textContent=combatMode?`Combat · ${S.conceptName} · ${S.weaponStyle}`:"";
  $("stickModeBanner").classList.toggle("reactive",S.mode==="reactivetrack");
  $("stickModeBanner").classList.toggle("scenario",S.mode==="gamescenario");
  $("trackingScorePanel").classList.toggle("hidden",!["dualtrack","reactivetrack","gamescenario"].includes(S.mode));
@@ -1347,7 +1580,7 @@ function renderStickPrompt(){
   $("hint").textContent=S.mode==="reactivetrack"?"React to unpredictable direction and speed changes":S.mode==="gamescenario"?"Game-like left-stick movement with stricter right-stick aim":"Track two independent targets simultaneously";
  }else if(S.mode==="strafeaim"){
   let strafe=lt?.angle===180?"LEFT":"RIGHT";
-  $("prompt").textContent=`STRAFE ${strafe} + AIM ${angleName(rt.angle)}`;
+  $("prompt").textContent=`STRAFE ${strafe} + AIM ${angleName(rt?.angle ?? 0)}`;
   $("sequenceStrip").textContent="Hold the left-stick strafe and place the right stick on the aim target";
   $("hint").textContent="Move and aim simultaneously, then hold both targets";
  }else{
@@ -1743,6 +1976,8 @@ function startSession(){
   beginChallengeMode();
   S.challengeSwitchPending=false;
   S.challengeSwitchAt=null;
+  updateUI();
+  return;
  }
  newRound();updateUI();
 }
@@ -1764,6 +1999,7 @@ function pauseSession(){
 function finalizeChallengeResults(){
  if(!S.challengeMode||S.challengeSessionFinalized)return;
  S.challengeSessionFinalized=true;
+ S.challengeFocusSnapToken++;
  S.challengeSwitchPending=false;
  S.challengeSwitchAt=null;
  S.challengeTransitioning=false;
@@ -1787,8 +2023,9 @@ function showReport(){
  $("reportCombo").textContent=S.longestCombo;$("reportWeakest").textContent=weakestButton();
  $("reportRecommendation").textContent=$("coachText").textContent;
  if(S.challengeMode){
-  $("summaryTitle").textContent="Challenge Complete";
-  $("retrySessionBtn").textContent="Restart Challenge";
+  const typeMeta=challengeTypeMeta();
+  $("summaryTitle").textContent=`${typeMeta.label} Complete`;
+  $("retrySessionBtn").textContent=`Restart ${typeMeta.label}`;
   $("closeSummaryBtn").textContent="Return to Menu";
   updateChallengeSummary();
  }else{
@@ -1840,6 +2077,7 @@ function frame(now){
    let p=!!gp.buttons[b]?.pressed,w=S.prev.get(b)||false;
    if(p&&!w)handlePress(b);if(!p)S.pair.delete(b);S.prev.set(b,p);
   }
+  updateSimultaneousButtonReleaseState(gp);
   checkSticks(gp,now);
  }else{
   if(S.controllerConnected||S.controllerIndex!==null){
@@ -1894,27 +2132,43 @@ window.addEventListener("gamepadconnected",handleGamepadConnected);
 window.addEventListener("gamepaddisconnected",handleGamepadDisconnected);
 
 document.querySelectorAll(".nav").forEach(b=>b.onclick=()=>{
+ const leavingStandaloneSimultaneous=!S.challengeMode&&S.mode==="simultaneous"&&!(b.dataset.mode==="simultaneous");
+ if(leavingStandaloneSimultaneous)clearSimultaneousButtonsRuntimeState();
  document.querySelectorAll(".nav").forEach(x=>x.classList.remove("active"));
- b.classList.add("active");
+ if(b.dataset.challengeType){
+  S.challengeMode=true;
+  S.mode="challenge";
+  S.challengeType=challengeTypeKey(b.dataset.challengeType);
+  clearActiveDrillState({resetController:true,resetPromptUi:true});
+  updateContextualSettings();
+  applyTrainingLayout();
+  updateModeSelectionUI();
+  saveV8Settings();
+  beginChallengeMode();
+  return;
+ }
  if(b.dataset.mode==="challenge"){
   S.challengeMode=true;
+  S.mode="challenge";
   clearActiveDrillState({resetController:true,resetPromptUi:true});
   updateContextualSettings();
   applyTrainingLayout();
   saveV8Settings();
   if(!S.running){beginChallengeMode();}else{render();}
- }else{
-  S.challengeMode=false;
-  S.challengeSwitchPending=false;
-  S.challengeSwitchAt=null;
-  S.challengeScenarioPreset=null;
-  S.mode=b.dataset.mode;
-  clearActiveDrillState({resetController:true,resetPromptUi:true});
-  updateContextualSettings();
-  applyTrainingLayout();
-  saveV8Settings();
-  if(S.running)newRound();else render();
+  return;
  }
+ S.challengeMode=false;
+ S.challengeSwitchPending=false;
+ S.challengeSwitchAt=null;
+ S.challengeCurrentMode=null;
+ S.challengeScenarioPreset=null;
+ S.mode=b.dataset.mode;
+ clearActiveDrillState({resetController:true,resetPromptUi:true});
+ updateContextualSettings();
+ applyTrainingLayout();
+ saveV8Settings();
+ if(S.running)newRound();else render();
+ updateModeSelectionUI();
 });
 $("startBtn").onclick=startSession;$("pauseBtn").onclick=pauseSession;$("stopBtn").onclick=stopSession;
 $("fullscreenBtn").onclick=()=>document.fullscreenElement?document.exitFullscreen():document.documentElement.requestFullscreen();
@@ -1999,7 +2253,7 @@ $("trackingPattern").onchange=()=>{if(S.running&&S.mode==="dualtrack")newRound()
 $("trackingTargetSize").onchange=()=>{if(S.running&&["dualtrack","reactivetrack","gamescenario"].includes(S.mode))newRound()};
 $("trackingDuration").onchange=()=>{if(S.running&&["dualtrack","reactivetrack","gamescenario"].includes(S.mode))newRound()};
 $("reactiveIntensity").onchange=()=>{if(S.running&&S.mode==="reactivetrack")newRound()};
-$("gameScenarioType").onchange=()=>{if(S.running&&S.mode==="gamescenario")newRound()};
+$("gameScenarioType").onchange=()=>{updateCombatPracticeDescription();if(S.running&&S.mode==="gamescenario")newRound()};
 $("leftMovementAmount").onchange=()=>{if(S.running&&S.mode==="gamescenario")newRound()};
 $("leftStickLeniency").onchange=()=>{if(S.running&&S.mode==="gamescenario")newRound()};
 $("angleTolerance").oninput=()=>$("angleToleranceValue").textContent=$("angleTolerance").value;
@@ -2012,8 +2266,10 @@ $("hideOnTargetToggle").checked=false;
 $("stickOffsetSlider").value="0";
 $("stickOffsetValue").textContent="0";
 loadStickColors();
+setCombatScenarioOptions();
 const startupUsesChallenge=loadV8Settings();
 bindV8Settings();
+updateCombatPracticeDescription();
 updateChallengeDurationLabel();
 setLayout($("layoutSelect").value||"xbox");
 applyDifficulty(+$("trainingDifficulty").value||3,false);
