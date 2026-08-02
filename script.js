@@ -41,7 +41,25 @@ const S={
  strafeAimRight:{phase:0},
  continuousModeLastFrame:0,
  trackingWasOnTarget:false,
- trackingHitSoundAt:0
+ trackingHitSoundAt:0,
+ controllerIndex:null,
+ controllerConnected:false,
+ controllerLabel:"",
+ challengeMode:false,
+ challengeQueue:[],
+ challengeCurrentMode:null,
+ challengeCompletedModes:[],
+ challengeModeStats:{},
+ challengeSwitchPending:false,
+ challengeSwitchAt:null,
+ challengeTransitioning:false,
+ challengeTransitionStartedAt:0,
+ challengeProgress:0,
+ challengeTargetCount:1,
+ challengeFallbackAt:0,
+ challengeDurationSec:10,
+ challengeScenarioPreset:null,
+ challengeSessionFinalized:false
 };
 
 function currentNames(){return S.layout==="playstation"?PS_NAME:XBOX_NAME}
@@ -53,6 +71,63 @@ function setLayout(layout){
  $("layoutBadge").textContent=layout==="xbox"?"Xbox":"PlayStation";
  render();
  updateAnalysis();
+}
+
+function updateControllerStatus(connected,label){
+ const status=$("controllerStatus");
+ if(!status)return;
+ if(connected){
+  status.textContent=label||"Controller connected";
+  status.className="status online";
+ }else{
+  status.textContent="No controller detected";
+  status.className="status offline";
+ }
+}
+
+function resetControllerState(){
+ S.prev=new Map();
+ S.pair=new Set();
+ S.lastButton=null;
+ S.holdStart=null;
+ S.dualStickHoldLocked=false;
+}
+
+function getActiveGamepad(){
+ const pads=navigator.getGamepads?navigator.getGamepads():[];
+ if(S.controllerIndex!==null){
+  const selected=pads[S.controllerIndex];
+  if(selected&&selected.connected)return selected;
+ }
+ for(const pad of pads){
+  if(pad&&pad.connected)return pad;
+ }
+ return null;
+}
+
+function handleGamepadConnected(event){
+ S.controllerIndex=event.gamepad.index;
+ S.controllerConnected=true;
+ S.controllerLabel=event.gamepad.id||"";
+ resetControllerState();
+ updateControllerStatus(true,S.controllerLabel||"Controller connected");
+}
+
+function handleGamepadDisconnected(event){
+ const remaining=getActiveGamepad();
+ if(remaining){
+  S.controllerIndex=remaining.index;
+  S.controllerConnected=true;
+  S.controllerLabel=remaining.id||"";
+  resetControllerState();
+  updateControllerStatus(true,S.controllerLabel||"Controller connected");
+  return;
+ }
+ S.controllerIndex=null;
+ S.controllerConnected=false;
+ S.controllerLabel="";
+ resetControllerState();
+ updateControllerStatus(false);
 }
 
 function isStickHeavyMode(){
@@ -229,7 +304,8 @@ const V8_SETTING_IDS=[
  "strafeIntensity","aimTargetStyle","trackingSpeed","trackingPattern",
  "reactiveIntensity","gameScenarioType","leftMovementAmount","leftStickLeniency",
  "trackingTargetSize","trackingDuration","timeSlider","soundToggle","completedToggle",
- "masterVolume","hitSoundSelect","completionSoundToggle"
+ "masterVolume","hitSoundSelect","completionSoundToggle","promptStyleSelect",
+ "challengeDuration","challengeRandomModesToggle","challengeRandomScenariosToggle","challengeNoRepeatsToggle"
 ];
 
 function stickFeel(x,y){
@@ -329,6 +405,7 @@ function bindV8Settings(){
   const event=(element.type==="range"||element.type==="color")?"input":"change";
   element.addEventListener(event,()=>{
    if(["masterVolume","soundToggle","hitSoundSelect","completionSoundToggle"].includes(id))updateAudioSummary();
+   if(id==="promptStyleSelect"&&["sequence","simultaneous"].includes(S.mode))render();
    saveV8Settings();
   });
  }
@@ -407,6 +484,64 @@ function highlightButton(b){
  let el=$(currentIds()[b]);
  if(el)el.classList.add("active");
 }
+function getPromptStyle(){
+ const select=$("promptStyleSelect");
+ return select&&select.value==="text"?"text":"visual";
+}
+
+function getButtonVisualParts(code){
+ const isXbox=S.layout==="xbox";
+ if(isXbox){
+  switch(code){
+   case 0:return {glyph:"A",label:"A",tone:"green",shape:"circle"};
+   case 1:return {glyph:"B",label:"B",tone:"red",shape:"circle"};
+   case 2:return {glyph:"X",label:"X",tone:"blue",shape:"circle"};
+   case 3:return {glyph:"Y",label:"Y",tone:"yellow",shape:"circle"};
+   case 4:return {glyph:"LB",label:"LB",tone:"neutral",shape:"shoulder"};
+   case 5:return {glyph:"RB",label:"RB",tone:"neutral",shape:"shoulder"};
+   case 6:return {glyph:"LT",label:"LT",tone:"neutral",shape:"trigger"};
+   case 7:return {glyph:"RT",label:"RT",tone:"neutral",shape:"trigger"};
+   case 8:return {glyph:"◷",label:"View",tone:"neutral",shape:"pill"};
+   case 9:return {glyph:"☰",label:"Menu",tone:"neutral",shape:"pill"};
+   case 12:return {glyph:"▲",label:"Up",tone:"neutral",shape:"dpad"};
+   case 13:return {glyph:"▼",label:"Down",tone:"neutral",shape:"dpad"};
+   case 14:return {glyph:"◀",label:"Left",tone:"neutral",shape:"dpad"};
+   case 15:return {glyph:"▶",label:"Right",tone:"neutral",shape:"dpad"};
+   default:return {glyph:currentNames()[code]||String(code),label:currentNames()[code]||String(code),tone:"neutral",shape:"text"};
+  }
+ }
+ switch(code){
+  case 0:return {glyph:"✕",label:"Cross",tone:"red",shape:"circle"};
+  case 1:return {glyph:"◯",label:"Circle",tone:"red",shape:"circle"};
+  case 2:return {glyph:"▢",label:"Square",tone:"blue",shape:"circle"};
+  case 3:return {glyph:"△",label:"Triangle",tone:"yellow",shape:"circle"};
+  case 4:return {glyph:"L1",label:"L1",tone:"neutral",shape:"shoulder"};
+  case 5:return {glyph:"R1",label:"R1",tone:"neutral",shape:"shoulder"};
+  case 6:return {glyph:"L2",label:"L2",tone:"neutral",shape:"trigger"};
+  case 7:return {glyph:"R2",label:"R2",tone:"neutral",shape:"trigger"};
+  case 8:return {glyph:"◫",label:"Share",tone:"neutral",shape:"pill"};
+  case 9:return {glyph:"☰",label:"Options",tone:"neutral",shape:"pill"};
+  case 10:return {glyph:"L3",label:"L3",tone:"neutral",shape:"pill"};
+  case 11:return {glyph:"R3",label:"R3",tone:"neutral",shape:"pill"};
+  case 12:return {glyph:"▲",label:"Up",tone:"neutral",shape:"dpad"};
+  case 13:return {glyph:"▼",label:"Down",tone:"neutral",shape:"dpad"};
+  case 14:return {glyph:"◀",label:"Left",tone:"neutral",shape:"dpad"};
+  case 15:return {glyph:"▶",label:"Right",tone:"neutral",shape:"dpad"};
+  default:return {glyph:currentNames()[code]||String(code),label:currentNames()[code]||String(code),tone:"neutral",shape:"text"};
+ }
+}
+
+function renderButtonVisuals(buttons,options={}){
+ const separator=options.separator||"";
+ const visualButtons=buttons.map((button,index)=>{
+  const parts=getButtonVisualParts(button);
+  const isActive=options.activeIndices?.has(index) || (options.highlightAll && index>=0) || (options.activeIndex===index);
+  const isCompleted=!!options.completedIndices?.has(index);
+  return `<span class="prompt-chip ${isActive?"prompt-chip--active":""} ${isCompleted?"prompt-chip--completed":""}"><span class="prompt-badge prompt-badge--${parts.tone} prompt-badge--${parts.shape}">${parts.glyph}</span></span>`;
+ });
+ return `<div class="prompt-visual-row">${visualButtons.join(separator)}</div>`;
+}
+
 function render(){
  applyTrainingLayout();
  clearHighlights();
@@ -421,6 +556,20 @@ function render(){
   $("hint").textContent="Press Pause to resume";return;
  }
  if(stickMode){renderStickPrompt();return}
+ if(["sequence","simultaneous"].includes(S.mode)&&getPromptStyle()==="visual"){
+  const remaining=S.seq;
+  $("prompt").innerHTML=renderButtonVisuals(remaining,{highlightAll:S.mode==="simultaneous",activeIndex:0,separator:S.mode==="simultaneous"?'<span class="prompt-separator">+</span>':""});
+  $("sequenceStrip").innerHTML="";
+  $("sequenceStrip").classList.add("hidden");
+  $("hint").textContent=S.mode==="endurance"?"Maintain speed and accuracy":
+   S.mode==="pressure"?"The timer tightens as you succeed":
+   S.mode==="apex"?"Complete the Apex-style action chain":
+   S.mode==="simultaneous"?"Press both highlighted controls together":
+   "Complete the chain before time expires";
+  if(S.mode==="simultaneous")S.seq.forEach(highlightButton);else if(S.seq[0]!==undefined)highlightButton(S.seq[0]);
+  return;
+ }
+ $("sequenceStrip").classList.remove("hidden");
  let sep=S.mode==="simultaneous"?" + ":" → ";
  $("prompt").textContent=S.seq.map(b=>currentNames()[b]).join(sep);
  let done=S.full.length-S.seq.length;
@@ -436,6 +585,7 @@ function render(){
 }
 
 const MODE_HINTS={
+ challenge:"Challenge Mode settings",
  sequence:"Button sequence settings",
  simultaneous:"Simultaneous button settings",
  sticks:"Single-stick settings",
@@ -445,14 +595,249 @@ const MODE_HINTS={
  reactivetrack:"Reactive-tracking settings",
  gamescenario:"Combat movement settings"
 };
+const CHALLENGE_MODE_POOL=["sequence","simultaneous","sticks","dualsticks","strafeaim","dualtrack","reactivetrack","gamescenario-smg","gamescenario-shotgun","gamescenario-micro","gamescenario-reset","gamescenario-mixed"];
+
+function challengeEntryMeta(entry){
+ if(entry==="gamescenario-smg")return{mode:"gamescenario",label:"Combat Movement — SMG",scenario:"smg"};
+ if(entry==="gamescenario-shotgun")return{mode:"gamescenario",label:"Combat Movement — Shotgun",scenario:"shotgun"};
+ if(entry==="gamescenario-micro")return{mode:"gamescenario",label:"Combat Movement — Micro",scenario:"micro"};
+ if(entry==="gamescenario-reset")return{mode:"gamescenario",label:"Combat Movement — Reset",scenario:"reset"};
+ if(entry==="gamescenario-mixed")return{mode:"gamescenario",label:"Combat Movement — Mixed",scenario:"mixed"};
+ const labels={sequence:"Sequence",simultaneous:"Simultaneous Buttons",sticks:"Single Stick",dualsticks:"Simultaneous Sticks",strafeaim:"Strafe + Aim",dualtrack:"Dual Tracking",reactivetrack:"Reactive Tracking",gamescenario:"Combat Movement"};
+ return{mode:entry,label:labels[entry]||entry,scenario:null};
+}
+
+function challengeEntryCategory(entry){
+ if(entry==="sequence"||entry==="simultaneous")return"button";
+ if(entry==="sticks"||entry==="dualsticks"||entry==="strafeaim")return"discrete-stick";
+ if(entry==="dualtrack"||entry==="reactivetrack")return"tracking";
+ if(entry==="gamescenario"||entry==="gamescenario-smg"||entry==="gamescenario-shotgun"||entry==="gamescenario-micro"||entry==="gamescenario-reset"||entry==="gamescenario-mixed")return"combat";
+ return"other";
+}
+
+function updateChallengeDurationLabel(){
+ const slider=$("challengeDuration");
+ const value=$("challengeDurationValue");
+ if(slider&&value){
+  const seconds=String(+slider.value||10);
+  value.textContent=seconds+"s";
+  S.challengeDurationSec=+slider.value||10;
+ }
+}
+
+function updateModeSelectionUI(){
+ document.querySelectorAll(".nav").forEach(button=>{
+  const isChallenge=button.dataset.mode==="challenge";
+  button.classList.toggle("active",S.challengeMode?isChallenge:button.dataset.mode===S.mode);
+ });
+}
+
+function buildChallengeQueue(){
+ const modes=[...CHALLENGE_MODE_POOL];
+ const queue=[];
+ let lastEntry=S.challengeCurrentMode||null;
+ let lastCategory=lastEntry?challengeEntryCategory(lastEntry):null;
+ while(modes.length){
+  let candidates=[...modes];
+  if($("challengeNoRepeatsToggle")?.checked!==false&&lastEntry){
+   candidates=candidates.filter(mode=>mode!==lastEntry);
+  }
+  if(lastCategory&&candidates.length>1){
+   const differentCategoryCandidates=candidates.filter(mode=>challengeEntryCategory(mode)!==lastCategory);
+   if(differentCategoryCandidates.length){
+    candidates=differentCategoryCandidates;
+   }
+  }
+  if(!candidates.length)candidates=[...modes];
+  const index=Math.floor(Math.random()*candidates.length);
+  const next=candidates[index];
+  queue.push(next);
+  const poolIndex=modes.indexOf(next);
+  if(poolIndex!==-1)modes.splice(poolIndex,1);
+  lastEntry=next;
+  lastCategory=challengeEntryCategory(lastEntry);
+ }
+ if($("challengeRandomModesToggle")?.checked===false){
+  return CHALLENGE_MODE_POOL.slice();
+ }
+ return queue;
+}
+
+function clearActiveDrillState(options={}){
+ clearHighlights();
+ S.stickTargets=[];
+ S.holdStart=null;
+ S.dualStickHoldLocked=false;
+ S.lastButton=null;
+ S.seq=[];
+ S.full=[];
+ S.trackingStart=0;
+ S.trackingEnd=0;
+ S.trackingOnTargetMs=0;
+ S.trackingLastFrame=0;
+ S.trackingPhaseLeft=0;
+ S.trackingPhaseRight=Math.PI;
+ S.trackingWanderLeft={x:0,y:0,vx:.22,vy:.17};
+ S.trackingWanderRight={x:0,y:0,vx:-.18,vy:.21};
+ S.reactiveLeft={x:0,y:0,vx:0,vy:0,nextChange:0,nextJump:0,pauseUntil:0};
+ S.reactiveRight={x:0,y:0,vx:0,vy:0,nextChange:0,nextJump:0,pauseUntil:0};
+ S.strafeAimLeft={x:0,targetX:0,nextChange:0};
+ S.strafeAimRight={phase:0};
+ S.scenarioLeft={x:0,y:0,targetX:0,nextChange:0};
+ S.scenarioRight={x:0,y:0,vx:0,vy:0,nextChange:0,nextJump:0};
+ S.scenarioName="";
+ S.scenarioLeftOnMs=0;
+ S.scenarioRightOnMs=0;
+ S.continuousModeLastFrame=0;
+ S.trackingWasOnTarget=false;
+ S.trackingHitSoundAt=0;
+ if(options.resetChallengePreset!==false)S.challengeScenarioPreset=null;
+ if(options.resetController!==false)resetControllerState();
+ clearTrails();
+ if(options.resetPromptUi!==false){
+  const prompt=$("prompt");
+  const strip=$("sequenceStrip");
+  if(prompt)prompt.innerHTML="";
+  if(strip)strip.innerHTML="";
+ }
+}
+
+function applyChallengeScenario(mode){
+ if(!S.challengeMode)return;
+ if(mode==="gamescenario"){
+  if(S.challengeScenarioPreset){
+   $("gameScenarioType").value=S.challengeScenarioPreset;
+   return;
+  }
+  if($("challengeRandomScenariosToggle")?.checked===false)return;
+  const scenarios=["smg","shotgun","micro","reset","mixed"];
+  $("gameScenarioType").value=scenarios[Math.floor(Math.random()*scenarios.length)];
+  return;
+ }
+ if($("challengeRandomScenariosToggle")?.checked===false)return;
+ if(mode==="strafeaim"){
+  const styles=["mixed","fine","outer"];
+  $("aimTargetStyle").value=styles[Math.floor(Math.random()*styles.length)];
+ }else if(mode==="dualtrack"||mode==="reactivetrack"){
+  const patterns=["circle","figure8","opposite","wander"];
+  $("trackingPattern").value=patterns[Math.floor(Math.random()*patterns.length)];
+ }
+}
+
+function beginChallengeMode(){
+ if(!S.challengeMode)return;
+ clearActiveDrillState({resetController:true,resetPromptUi:true});
+ S.challengeQueue=buildChallengeQueue();
+ S.challengeCompletedModes=[];
+ S.challengeModeStats={};
+ S.challengeTransitioning=false;
+ S.challengeTransitionStartedAt=0;
+ S.challengeSessionFinalized=false;
+ const nextEntry=S.challengeQueue.shift()||CHALLENGE_MODE_POOL[0];
+ const entryMeta=challengeEntryMeta(nextEntry);
+ S.challengeCurrentMode=nextEntry;
+ S.mode=entryMeta.mode;
+ S.challengeScenarioPreset=entryMeta.scenario;
+ S.challengeSwitchPending=false;
+ S.challengeSwitchAt=null;
+ S.challengeProgress=0;
+ S.challengeTargetCount=challengeTargetForCurrentMode();
+ S.challengeFallbackAt=performance.now()+15000;
+ applyChallengeScenario(S.mode);
+ updateContextualSettings();
+ applyTrainingLayout();
+ render();
+}
+
+function challengeTargetForCurrentMode(){
+ const mode=S.mode;
+ if(mode==="sequence")return 1+Math.floor(Math.random()*3);
+ if(mode==="simultaneous")return 2+Math.floor(Math.random()*3);
+ if(mode==="sticks")return 2+Math.floor(Math.random()*3);
+ if(mode==="dualsticks")return 2+Math.floor(Math.random()*3);
+ if(mode==="strafeaim")return 2+Math.floor(Math.random()*3);
+ return null;
+}
+
+function challengeDurationForCurrentMode(){
+ const mode=S.mode;
+ if(mode==="dualtrack"||mode==="reactivetrack"||mode==="gamescenario")return 6000+Math.floor(Math.random()*6000);
+ return null;
+}
+
+function beginChallengeDrill(){
+ const target=challengeTargetForCurrentMode();
+ S.challengeProgress=0;
+ S.challengeTargetCount=target;
+ S.challengeFallbackAt=performance.now()+15000;
+ if(S.challengeMode&&S.mode!=="challenge"){
+  S.challengeSwitchPending=false;
+  S.challengeSwitchAt=performance.now()+Math.max(6000,Math.min(12000,challengeDurationForCurrentMode()||7000));
+ }
+}
+
+function advanceChallengeMode(){
+ if(!S.challengeMode||!S.running||S.paused||S.challengeTransitioning||S.challengeSessionFinalized)return;
+ S.challengeTransitioning=true;
+ S.challengeTransitionStartedAt=performance.now();
+ if(S.mode&&S.mode!="challenge"){
+  if(!S.challengeCompletedModes.includes(S.challengeCurrentMode||S.mode))S.challengeCompletedModes.push(S.challengeCurrentMode||S.mode);
+ }
+ const nextEntry=S.challengeQueue.shift()||buildChallengeQueue().shift();
+ if(!nextEntry){S.challengeTransitioning=false;S.challengeTransitionStartedAt=0;return;}
+ const entryMeta=challengeEntryMeta(nextEntry);
+ clearActiveDrillState({resetController:true,resetPromptUi:true});
+ S.challengeCurrentMode=nextEntry;
+ S.mode=entryMeta.mode;
+ S.challengeScenarioPreset=entryMeta.scenario;
+ S.challengeSwitchPending=false;
+ S.challengeSwitchAt=null;
+ S.challengeProgress=0;
+ S.challengeTargetCount=challengeTargetForCurrentMode();
+ S.challengeFallbackAt=performance.now()+15000;
+ applyChallengeScenario(S.mode);
+ updateContextualSettings();
+ applyTrainingLayout();
+ newRound();
+ render();
+ S.challengeTransitioning=false;
+ S.challengeTransitionStartedAt=0;
+}
+
+function activeChallengeEntryKey(){
+ return S.challengeCurrentMode||S.mode||"challenge";
+}
+
+function recordChallengeOutcome(mode,ok){
+ if(!S.challengeMode||!mode)return;
+ const entry=S.challengeModeStats[mode]||(S.challengeModeStats[mode]={rounds:0,successes:0,failures:0});
+ entry.rounds++;
+ if(ok)entry.successes++;else entry.failures++;
+}
+
+function updateChallengeSummary(){
+ const summary=$("challengeSummary");
+ if(!summary)return;
+ if(!S.challengeMode){summary.classList.add("hidden");return}
+ const entries=Object.entries(S.challengeModeStats).filter(([,stats])=>stats.rounds>0).map(([mode,stats])=>({mode,stats}));
+ if(!entries.length){summary.textContent="Challenge Mode is active. Keep the flow moving and the next drill will appear automatically.";summary.classList.remove("hidden");return}
+ const best=entries.slice().sort((a,b)=>(b.stats.successes/b.stats.rounds)-(a.stats.successes/a.stats.rounds)||b.stats.rounds-a.stats.rounds)[0];
+ const needsPractice=entries.slice().sort((a,b)=>(a.stats.successes/a.stats.rounds)-(b.stats.successes/b.stats.rounds)||a.stats.rounds-b.stats.rounds)[0];
+ const bestName=best?challengeEntryMeta(best.mode).label:"—";
+ const needsPracticeName=needsPractice?challengeEntryMeta(needsPractice.mode).label:"—";
+ summary.textContent=`Modes completed: ${S.challengeCompletedModes.length || entries.length}. Best mode: ${bestName}. Needs practice: ${needsPracticeName}.`;
+ summary.classList.remove("hidden");
+}
 
 function updateContextualSettings(){
- $("settingsModeHint").textContent=MODE_HINTS[S.mode]||"Training settings";
+ const targetMode=S.challengeMode?"challenge":S.mode;
+ $("settingsModeHint").textContent=MODE_HINTS[targetMode]||"Training settings";
  document.querySelectorAll("[data-modes]").forEach(element=>{
   const modes=element.dataset.modes.split(",");
-  element.classList.toggle("mode-hidden",!modes.includes(S.mode));
+  element.classList.toggle("mode-hidden",!modes.includes(targetMode));
  });
  updateMovingModeDescription();
+ updateChallengeDurationLabel();
 }
 
 function updateContinuousTargets(now){
@@ -466,9 +851,15 @@ function updateContinuousTargets(now){
 function newRound(){
  if(!S.running||S.paused)return;
  S.trackingWasOnTarget=false;
- clearTrails();
- S.stickTargets=[];S.holdStart=null;S.dualStickHoldLocked=false;S.lastButton=null;
+ clearActiveDrillState({resetController:true,resetPromptUi:true});
  let len=+$("sequenceLength").value;
+ if(S.challengeMode){
+  S.challengeSwitchPending=false;
+  S.challengeSwitchAt=null;
+  if(challengeDurationForCurrentMode()!=null){
+   S.challengeSwitchAt=performance.now()+challengeDurationForCurrentMode();
+  }
+ }
  if(S.mode==="sticks")S.stickTargets=[makeStickTarget(Math.random()<.5?"ls":"rs")];
  else if(S.mode==="dualsticks")S.stickTargets=[makeStickTarget("ls"),makeStickTarget("rs")];
  else if(S.mode==="strafeaim"){
@@ -665,8 +1056,20 @@ function completeRound(){
  if(!S.bestSequence||ms<S.bestSequence)S.bestSequence=ms;
  S.successWindow.push(true);
  if(S.mode==="dualsticks"||S.mode==="strafeaim")S.challenge.dual100++;
+ recordChallengeOutcome(activeChallengeEntryKey(),true);
  updateChallenges();
- tone(true);persist();updateUI();newRound();
+ tone(true);persist();updateUI();
+ if(S.challengeMode){
+  if(challengeDurationForCurrentMode()==null){
+   S.challengeProgress++;
+   if(S.challengeProgress>=Math.max(1,S.challengeTargetCount||1)){
+    advanceChallengeMode();
+    return;
+   }
+  }
+  if(S.challengeSwitchPending){advanceChallengeMode();return}
+ }
+ newRound();
 }
 
 function completeDualStickPair(now){
@@ -677,16 +1080,31 @@ function completeDualStickPair(now){
  if(!S.bestSequence||ms<S.bestSequence)S.bestSequence=ms;
  S.successWindow.push(true);
  S.challenge.dual100++;
+ recordChallengeOutcome(activeChallengeEntryKey(),true);
  S.stickTargets=[makeStickTarget("ls"),makeStickTarget("rs")];
  S.holdStart=null;
  S.dualStickHoldLocked=true;
  updateChallenges();
- tone(true);persist();updateUI();render();
+ tone(true);persist();updateUI();
+ if(S.challengeMode){
+  if(challengeDurationForCurrentMode()==null){
+   S.challengeProgress++;
+   if(S.challengeProgress>=Math.max(1,S.challengeTargetCount||1)){
+    advanceChallengeMode();
+    return;
+   }
+  }
+  if(S.challengeSwitchPending){advanceChallengeMode();return}
+ }
+ render();
 }
 function failRound(options={}){
  if(!S.running||S.paused)return;
  S.misses++;S.currentCombo=0;S.lastMissAt=performance.now();S.successWindow.push(false);
- if(!options.silent)tone(false);persist();updateUI();newRound();
+ recordChallengeOutcome(activeChallengeEntryKey(),false);
+ if(!options.silent)tone(false);persist();updateUI();
+ if(S.challengeMode&&S.challengeSwitchPending){advanceChallengeMode();return}
+ newRound();
 }
 function handlePress(b){
  if(!S.running){if(b===9)startSession();return}
@@ -1161,6 +1579,11 @@ function startSession(){
  S.hesitations=0;S.recoveryTimes=[];S.lastMissAt=null;S.successWindow=[];S.lastInputAt=null;
  S.infiniteSession=isInfiniteEligibleMode()&&$("infiniteStickSession").checked;
  S.sessionEnd=S.infiniteSession?Infinity:S.sessionStart+sessionLengthMs();
+ if(S.challengeMode){
+  beginChallengeMode();
+  S.challengeSwitchPending=false;
+  S.challengeSwitchAt=null;
+ }
  newRound();updateUI();
 }
 function pauseSession(){
@@ -1178,9 +1601,23 @@ function pauseSession(){
  }
  render();
 }
+function finalizeChallengeResults(){
+ if(!S.challengeMode||S.challengeSessionFinalized)return;
+ S.challengeSessionFinalized=true;
+ S.challengeSwitchPending=false;
+ S.challengeSwitchAt=null;
+ S.challengeTransitioning=false;
+ S.challengeTransitionStartedAt=0;
+ S.challengeFallbackAt=0;
+ clearActiveDrillState({resetController:false,resetPromptUi:true});
+ S.lifeSessions++;persist();render();updateCoach();showReport();
+}
+
 function stopSession(){
  if(!S.running)return;
- clearTrails();S.running=false;S.paused=false;S.lifeSessions++;persist();render();updateCoach();showReport();
+ clearTrails();S.running=false;S.paused=false;
+ if(S.challengeMode){finalizeChallengeResults();return}
+ S.lifeSessions++;persist();render();updateCoach();showReport();
 }
 function showReport(){
  let total=S.hits+S.misses,acc=total?Math.round(S.hits/total*100):100;
@@ -1189,19 +1626,70 @@ function showReport(){
  $("reportTransition").textContent=S.transitionTimes.length?Math.round(average(S.transitionTimes))+" ms":"—";
  $("reportCombo").textContent=S.longestCombo;$("reportWeakest").textContent=weakestButton();
  $("reportRecommendation").textContent=$("coachText").textContent;
+ if(S.challengeMode){
+  $("summaryTitle").textContent="Challenge Complete";
+  $("retrySessionBtn").textContent="Restart Challenge";
+  $("closeSummaryBtn").textContent="Return to Menu";
+  updateChallengeSummary();
+ }else{
+  $("summaryTitle").textContent="Session Complete";
+  $("retrySessionBtn").textContent="Retry";
+  $("closeSummaryBtn").textContent="Close";
+  $("challengeSummary").classList.add("hidden");
+ }
  $("summaryModal").classList.remove("hidden");
 }
 function frame(now){
+ if(S.challengeMode&&S.challengeTransitioning&&S.challengeTransitionStartedAt&&now>=S.challengeTransitionStartedAt+400){
+  S.challengeTransitioning=false;
+  S.challengeTransitionStartedAt=0;
+  S.challengeSwitchPending=false;
+  S.challengeSwitchAt=null;
+  advanceChallengeMode();
+  requestAnimationFrame(frame);
+  return;
+ }
+ if(S.challengeMode&&S.challengeTransitioning){
+  updateUI(now);
+  requestAnimationFrame(frame);
+  return;
+ }
  updateContinuousTargets(now);
- let gp=Array.from(navigator.getGamepads?navigator.getGamepads():[]).find(Boolean);
+ if(S.challengeMode&&S.challengeSwitchAt!==null&&now>=S.challengeSwitchAt){
+  S.challengeSwitchPending=true;
+  S.challengeSwitchAt=null;
+ }
+ if(S.challengeMode&&now>=S.challengeFallbackAt){
+  S.challengeSwitchPending=true;
+ }
+ if(S.challengeMode&&S.challengeSwitchPending&&challengeDurationForCurrentMode()==null){
+  advanceChallengeMode();
+  requestAnimationFrame(frame);
+  return;
+ }
+ let gp=getActiveGamepad();
  if(gp){
-  $("controllerStatus").textContent=gp.id||"Controller connected";$("controllerStatus").className="status online";
+  if(!S.controllerConnected||S.controllerIndex!==gp.index){
+   S.controllerIndex=gp.index;
+   S.controllerConnected=true;
+   S.controllerLabel=gp.id||"";
+   resetControllerState();
+  }
+  updateControllerStatus(true,S.controllerLabel||gp.id||"Controller connected");
   for(const b of BUTTONS){
    let p=!!gp.buttons[b]?.pressed,w=S.prev.get(b)||false;
    if(p&&!w)handlePress(b);if(!p)S.pair.delete(b);S.prev.set(b,p);
   }
   checkSticks(gp,now);
- }else{$("controllerStatus").textContent="No controller detected";$("controllerStatus").className="status offline"}
+ }else{
+  if(S.controllerConnected||S.controllerIndex!==null){
+   S.controllerIndex=null;
+   S.controllerConnected=false;
+   S.controllerLabel="";
+   resetControllerState();
+  }
+  updateControllerStatus(false);
+ }
  if(S.running&&!S.paused){
   if(now>=S.sessionEnd){
    stopSession();
@@ -1227,6 +1715,11 @@ function frame(now){
    const silentStick=["sticks","dualsticks","strafeaim"].includes(S.mode);
    failRound({silent:silentStick});
   }
+  if(S.challengeMode&&S.challengeSwitchPending&&isContinuousTrackingMode()&&rem<=0){
+   advanceChallengeMode();
+   requestAnimationFrame(frame);
+   return;
+  }
   let sec=Math.floor((now-S.sessionStart)/1000);
   $("sessionDuration").textContent=String(Math.floor(sec/60)).padStart(2,"0")+":"+String(sec%60).padStart(2,"0");
  }else{
@@ -1237,23 +1730,42 @@ function frame(now){
  updateUI(now);requestAnimationFrame(frame);
 }
 
+window.addEventListener("gamepadconnected",handleGamepadConnected);
+window.addEventListener("gamepaddisconnected",handleGamepadDisconnected);
+
 document.querySelectorAll(".nav").forEach(b=>b.onclick=()=>{
  document.querySelectorAll(".nav").forEach(x=>x.classList.remove("active"));
  b.classList.add("active");
- S.mode=b.dataset.mode;
- S.stickTargets=[];
- S.holdStart=null;
- updateContextualSettings();
- applyTrainingLayout();
- saveV8Settings();
- if(S.running)newRound();else render();
+ if(b.dataset.mode==="challenge"){
+  S.challengeMode=true;
+  clearActiveDrillState({resetController:true,resetPromptUi:true});
+  updateContextualSettings();
+  applyTrainingLayout();
+  saveV8Settings();
+  if(!S.running){beginChallengeMode();}else{render();}
+ }else{
+  S.challengeMode=false;
+  S.challengeSwitchPending=false;
+  S.challengeSwitchAt=null;
+  S.challengeScenarioPreset=null;
+  S.mode=b.dataset.mode;
+  clearActiveDrillState({resetController:true,resetPromptUi:true});
+  updateContextualSettings();
+  applyTrainingLayout();
+  saveV8Settings();
+  if(S.running)newRound();else render();
+ }
 });
 $("startBtn").onclick=startSession;$("pauseBtn").onclick=pauseSession;$("stopBtn").onclick=stopSession;
 $("fullscreenBtn").onclick=()=>document.fullscreenElement?document.exitFullscreen():document.documentElement.requestFullscreen();
-$("closeSummaryBtn").onclick=()=>$("summaryModal").classList.add("hidden");
+$("closeSummaryBtn").onclick=()=>{$("summaryModal").classList.add("hidden");};
 $("retrySessionBtn").onclick=()=>{
  $("summaryModal").classList.add("hidden");
- startSession();
+ if(S.challengeMode){
+  startSession();
+ }else{
+  startSession();
+ }
 };
 $("resetStatsBtn").onclick=()=>{localStorage.removeItem("ctv5");location.reload()};
 $("timeSlider").oninput=()=>{updateUI();if(S.running){S.roundLimit=effectiveLimit();S.start=performance.now();S.deadline=S.start+S.roundLimit}};
@@ -1291,6 +1803,10 @@ function applyApexDefaults(){
  if(S.running)newRound();
 }
 $("applyApexDefaultsBtn").onclick=()=>{};
+$("challengeDuration").oninput=()=>{updateChallengeDurationLabel();};
+$("challengeRandomModesToggle").onchange=()=>{if(S.running&&S.challengeMode)beginChallengeMode();};
+$("challengeRandomScenariosToggle").onchange=()=>{if(S.running&&S.challengeMode)newRound();};
+$("challengeNoRepeatsToggle").onchange=()=>{if(S.running&&S.challengeMode)beginChallengeMode();};
 $("sessionDurationMinutes").onchange=()=>{
  if(S.running&&!S.infiniteSession)S.sessionEnd=S.sessionStart+sessionLengthMs();
 };
@@ -1338,10 +1854,12 @@ $("stickOffsetValue").textContent="0";
 loadStickColors();
 loadV8Settings();
 bindV8Settings();
+updateChallengeDurationLabel();
 setLayout($("layoutSelect").value||"xbox");
 applyDifficulty(+$("trainingDifficulty").value||3,false);
 updateContextualSettings();
 applyTrainingLayout();
+updateModeSelectionUI();
 updateUI();
 render();
 requestAnimationFrame(frame);

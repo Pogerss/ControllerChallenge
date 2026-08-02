@@ -25,8 +25,15 @@
   <div class="workspace">
     <aside class="sidebar panel">
       <div class="mode-group">
+        <div class="section-title">Challenge</div>
+        <button class="nav active" data-mode="challenge">
+          <span>Challenge Mode</span><small>Auto-rotate through the drills</small>
+        </button>
+      </div>
+
+      <div class="mode-group">
         <div class="section-title">Buttons</div>
-        <button class="nav active" data-mode="sequence">
+        <button class="nav" data-mode="sequence">
           <span>Sequence</span><small>Accurate button chains</small>
         </button>
         <button class="nav" data-mode="simultaneous">
@@ -350,6 +357,29 @@
           <p class="settings-section-copy">Mode-specific controls adjust to the active drill.</p>
         </div>
         <div class="settings-section-body">
+          <div class="mode-setting challenge-settings" data-modes="challenge">
+            <div class="settings-section-heading">
+              <div class="section-title">Challenge Mode</div>
+              <p class="settings-section-copy">Let the existing drills flow together with a natural handoff every few seconds.</p>
+            </div>
+            <label class="field">Duration
+              <input id="challengeDuration" type="range" min="7" max="15" value="10">
+              <small id="challengeDurationValue">10s</small>
+            </label>
+            <label class="toggle">
+              <input id="challengeRandomModesToggle" type="checkbox" checked>
+              Random Modes
+            </label>
+            <label class="toggle">
+              <input id="challengeRandomScenariosToggle" type="checkbox" checked>
+              Random Scenarios
+            </label>
+            <label class="toggle">
+              <input id="challengeNoRepeatsToggle" type="checkbox" checked>
+              No Immediate Repeats
+            </label>
+          </div>
+
           <details class="settings-details mode-setting" data-modes="sequence,simultaneous" open>
             <summary>Button drill</summary>
             <div class="details-content">
@@ -367,6 +397,13 @@
               <label class="field">Prompt time
                 <input id="timeSlider" type="range" min="900" max="5000" step="50" value="2200">
                 <small id="timeLabel">Hard</small>
+              </label>
+
+              <label class="field">Prompt style
+                <select id="promptStyleSelect">
+                  <option value="visual" selected>Visual</option>
+                  <option value="text">Text (Legacy)</option>
+                </select>
               </label>
 
               <label class="toggle">Show completed inputs <input id="completedToggle" type="checkbox" checked></label>
@@ -617,17 +654,27 @@
 
   <div id="summaryModal" class="modal hidden">
     <div class="modal-card">
-      <span class="eyebrow">Session complete</span>
-      <h2>Session Results</h2>
-      <div class="report-grid">
-        <div><span>APM</span><strong id="reportApm">0</strong></div>
-        <div><span>Peak APM</span><strong id="reportPeak">0</strong></div>
-        <div><span>Accuracy</span><strong id="reportAccuracy">100%</strong></div>
-        <div><span>Avg transition</span><strong id="reportTransition">—</strong></div>
-        <div><span>Longest combo</span><strong id="reportCombo">0</strong></div>
-        <div><span>Weakest input</span><strong id="reportWeakest">—</strong></div>
+      <div class="modal-card-header">
+        <span class="eyebrow">Session complete</span>
+        <h2 id="summaryTitle">Session Complete</h2>
+        <p class="modal-card-copy">Your run is wrapped up. Review the snapshot below and jump back in whenever you are ready.</p>
+      </div>
+      <div class="report-shell">
+        <div class="report-card report-card--primary report-card--hero">
+          <span>APM</span>
+          <strong id="reportApm">0</strong>
+          <small>Current session pace</small>
+        </div>
+        <div class="report-grid">
+          <div class="report-card"><span>Peak APM</span><strong id="reportPeak">0</strong></div>
+          <div class="report-card"><span>Accuracy</span><strong id="reportAccuracy">100%</strong></div>
+          <div class="report-card"><span>Avg transition</span><strong id="reportTransition">—</strong></div>
+          <div class="report-card"><span>Longest combo</span><strong id="reportCombo">0</strong></div>
+          <div class="report-card"><span>Weakest input</span><strong id="reportWeakest">—</strong></div>
+        </div>
       </div>
       <div id="reportRecommendation" class="report-note compatibility-ui"></div>
+      <div id="challengeSummary" class="report-note hidden"></div>
       <div class="summary-actions">
         <button id="retrySessionBtn" class="primary">Retry</button>
         <button id="closeSummaryBtn" class="ghost">Close</button>
