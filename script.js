@@ -39,6 +39,7 @@ const S={
  scenarioLeft:{x:0,y:0,vx:0,vy:0,targetVx:0,targetVy:0,speed:0,targetX:0,targetY:0,nextChange:0},
  scenarioRight:{x:0,y:0,vx:0,vy:0,targetVx:0,targetVy:0,speed:0,targetX:0,targetY:0,nextChange:0,nextJump:0},
  currentCombatMechanicId:null,combatMechanicHistory:[],
+ currentMovementPatternId:null,combatMovementPatternDirection:1,combatDrillHistory:[],
  combatActivationCounts:{},combatRoleSwap:false,scenarioMotionStartedAt:0,
  mechanicTrace:null,
  scenarioName:"",weaponStyle:"",conceptName:"",scenarioLeftOnMs:0,scenarioRightOnMs:0,
@@ -554,7 +555,8 @@ const COMBAT_DIFFICULTY_FIELDS_BY_FAMILY={
  ladder:["motionSpeed","pathRange","outerPressureChance","directionChangeRate","trackingTolerance"],
  curve:["motionSpeed","pathRange","directionChangeRate","trackingTolerance"],
  angle:["motionSpeed","pathRange","trackingTolerance"],
- priority:["motionSpeed","pathRange","directionChangeRate","trackingTolerance","independenceAmount"]
+ priority:["motionSpeed","pathRange","directionChangeRate","trackingTolerance","independenceAmount"],
+ Strafe:["motionSpeed","pathRange","outerPressureChance","directionChangeRate","trackingTolerance","independenceAmount"]
 };
 
 function clampNumber(value,min,max){
@@ -830,7 +832,7 @@ function render(){
 }
 
 const MODE_HINTS={
- challenge:"Challenge settings",
+ challenge:"Drill settings",
  sequence:"Button sequence settings",
  simultaneous:"Simultaneous button settings",
  sticks:"Single-stick settings",
@@ -841,11 +843,13 @@ const MODE_HINTS={
  gamescenario:"Combat settings"
 };
 const CHALLENGE_TYPE_DEFS={
- full:{label:"Full Challenge",summary:["Mixed buttons, sticks, tracking, and combat concepts.","Auto-rotates through the full pool."],categories:["button","stick","combat"]},
- combat:{label:"Combat Challenge",summary:["Weapon styles and transferable stick-control concepts.","Rotates through the combat concept set."],categories:["combat"]},
- mechanic:{label:"Mechanic Challenge",summary:["Every enabled continuous Combat mechanic.","Time-based tracking with no contact completion."],categories:["combat"]},
- stick:{label:"Stick Challenge",summary:["Stick placement, tension, tracking, and coordinated movement.","Pairs single-stick and dual-stick work."],categories:["stick"]},
- button:{label:"Button Challenge",summary:["Sequences, simultaneous inputs, timing, and release control.","Focuses on button-only execution."],categories:["button"]}
+ full:{label:"Full Drill",summary:["Mixed buttons, sticks, tracking, and combat concepts.","Auto-rotates through the full pool."],categories:["button","stick","combat"]},
+ combat:{label:"Combat Drill",summary:["Random movement patterns paired with existing Combat mechanics.","Each timed scenario trains one movement and aim combination."],categories:["combat"]},
+ combatflow:{label:"Combat Flow Drill",summary:["Ten authored movement-and-aim fight scenarios.","Each flows through establish, pressure, and recovery phases."],categories:["combat"]},
+ mechanic:{label:"Mechanic Drill",summary:["Every enabled continuous Combat mechanic.","Time-based tracking with no contact completion."],categories:["combat"]},
+ strafe:{label:"Strafe Drill",summary:["Transferable FPS movement situations using the shared Combat trainer.","Continuous, time-scored strafing with no contact completion."],categories:["combat"]},
+ stick:{label:"Stick Drill",summary:["Stick placement, tension, tracking, and coordinated movement.","Pairs single-stick and dual-stick work."],categories:["stick"]},
+ button:{label:"Button Drill",summary:["Sequences, simultaneous inputs, timing, and release control.","Focuses on button-only execution."],categories:["button"]}
 };
 
 function challengeTypeKey(type=S.challengeType){
@@ -857,7 +861,14 @@ function challengeTypeMeta(type=S.challengeType){
 }
 
 function challengeEntriesForType(type=S.challengeType){
- if(challengeTypeKey(type)==="mechanic"){
+ const typeKey=challengeTypeKey(type);
+ if(typeKey==="combatflow")return COMBAT_FLOW_SCENARIOS.map(entry=>entry.id);
+ if(typeKey==="strafe"){
+  return STRAFE_COMBAT_SCENARIOS
+   .filter(entry=>getCombatMechanicById(entry.mechanics[0]).family==="Strafe")
+   .map(entry=>entry.id);
+ }
+ if(typeKey==="mechanic"){
   return COMBAT_SCENARIOS
    .filter(entry=>getCombatMechanicById(entry.mechanics?.[0]||entry.id).behavior==="continuous")
    .map(entry=>entry.id);
@@ -994,6 +1005,115 @@ function setChallengeType(type,options={}){
  if(S.challengeMode)render();
 }
 
+const COMBAT_MOVEMENT_PATTERNS=[
+ {id:"wideStrafe",label:"Wide Strafe",cycleMs:6200,band:[.66,.86],speed:.88,kind:"switch",transition:.2},
+ {id:"tightStrafe",label:"Tight Strafe",cycleMs:2800,band:[.3,.5],speed:.72,kind:"switch",transition:.32},
+ {id:"longHold",label:"Long Hold",cycleMs:9200,band:[.62,.8],speed:.68,kind:"switch",transition:.08},
+ {id:"delayedSwitch",label:"Delayed Switch",cycleMs:5200,band:[.54,.78],speed:.82,kind:"delayed",transition:.18},
+ {id:"burstStrafe",label:"Burst Strafe",cycleMs:3200,band:[.18,.82],speed:.92,kind:"burst"},
+ {id:"rhythmBreak",label:"Rhythm Break",cycleMs:6100,band:[.34,.78],speed:.86,kind:"rhythm"},
+ {id:"strafeRecovery",label:"Strafe Recovery",cycleMs:4300,band:[.46,.82],speed:.84,kind:"recovery"},
+ {id:"pressureCarry",label:"Pressure Carry",cycleMs:6800,band:[.7,.86],speed:.74,kind:"carry",transition:.12},
+ {id:"reversePressure",label:"Reverse Pressure",cycleMs:3900,band:[.6,.84],speed:.9,kind:"switch",transition:.12}
+];
+const COMBAT_MOVEMENT_PATTERN_BY_ID=Object.fromEntries(COMBAT_MOVEMENT_PATTERNS.map(pattern=>[pattern.id,pattern]));
+
+const COMBAT_FLOW_SCENARIOS=[
+ {id:"flowWideStrafeHold",label:"Wide Strafe Hold",cue:"Commit and hold",family:"commit",mechanic:"pressureHold",cycleMs:7600},
+ {id:"flowDelayedReversal",label:"Delayed Reversal",cue:"Wait, then reverse",family:"timing",mechanic:"independentTiming",cycleMs:8200},
+ {id:"flowBurstAndSettle",label:"Burst and Settle",cue:"Burst, then settle",family:"control",mechanic:"settle",cycleMs:5600},
+ {id:"flowCounterAim",label:"Counter Aim",cue:"Counter gently",family:"counter",mechanic:"counterPressure",cycleMs:6800},
+ {id:"flowPressureRelease",label:"Pressure Release",cue:"Release smoothly",family:"release",mechanic:"pressureRelease",cycleMs:7200},
+ {id:"flowEdgeControl",label:"Edge Control",cue:"Control the edge",family:"edge",mechanic:"controlledExit",cycleMs:7000},
+ {id:"flowStrafeRecovery",label:"Strafe Recovery",cue:"Recover, don’t chase",family:"recovery",mechanic:"recover",cycleMs:6600},
+ {id:"flowStableAimSwitch",label:"Stable Aim Switch",cue:"Keep aim calm",family:"stability",mechanic:"stableAim",cycleMs:6200},
+ {id:"flowMovementHoldAimWork",label:"Movement Hold, Aim Work",cue:"Hold movement",family:"separation",mechanic:"pressureUnderAim",cycleMs:7400},
+ {id:"flowRhythmBreak",label:"Rhythm Break",cue:"Break the rhythm",family:"rhythm",mechanic:"strafeSwitch",cycleMs:7800}
+].map(entry=>({...entry,weaponStyle:"",conceptName:entry.label,description:entry.cue,mode:"gamescenario",profile:entry.mechanic,mechanics:[entry.mechanic]}));
+const COMBAT_FLOW_SCENARIO_BY_ID=Object.fromEntries(COMBAT_FLOW_SCENARIOS.map(entry=>[entry.id,entry]));
+const COMBAT_FLOW_PHASE_TRACKS={
+ flowWideStrafeHold:[
+  {at:0,phase:"establish",left:[.2,0],right:[.14,.01]},
+  {at:.16,phase:"pressure",left:[.78,0],right:[.22,-.01]},
+  {at:.4,phase:"pressure",left:[.8,.01],right:[.24,.01]},
+  {at:.52,phase:"recover",left:[.08,0],right:[.14,0]},
+  {at:.68,phase:"establish",left:[-.76,0],right:[-.2,-.01]},
+  {at:.9,phase:"recover",left:[-.34,0],right:[-.15,0]},
+  {at:1,phase:"establish",left:[.2,0],right:[.14,.01]}
+ ],
+ flowDelayedReversal:[
+  {at:0,phase:"establish",left:[.28,0],right:[-.12,.02]},
+  {at:.16,phase:"pressure",left:[.72,0],right:[-.16,-.01]},
+  {at:.54,phase:"pressure",left:[.74,0],right:[-.11,.02]},
+  {at:.66,phase:"recover",left:[-.7,0],right:[-.08,-.01]},
+  {at:.86,phase:"recover",left:[-.5,0],right:[.12,0]},
+  {at:1,phase:"establish",left:[.28,0],right:[-.12,.02]}
+ ],
+ flowBurstAndSettle:[
+  {at:0,phase:"establish",left:[.18,0],right:[.12,0]},
+  {at:.16,phase:"pressure",left:[.82,0],right:[.18,.03]},
+  {at:.32,phase:"recover",left:[.2,0],right:[.1,0]},
+  {at:.54,phase:"establish",left:[.16,0],right:[-.08,-.02]},
+  {at:.7,phase:"pressure",left:[-.76,0],right:[-.16,.02]},
+  {at:.84,phase:"recover",left:[-.18,0],right:[-.08,0]},
+  {at:1,phase:"establish",left:[.18,0],right:[.12,0]}
+ ],
+ flowCounterAim:[
+  {at:0,phase:"establish",left:[.3,0],right:[-.12,.01]},
+  {at:.24,phase:"pressure",left:[.8,.03],right:[-.3,-.02]},
+  {at:.5,phase:"recover",left:[.18,0],right:[-.08,0]},
+  {at:.72,phase:"pressure",left:[-.78,-.03],right:[.28,.02]},
+  {at:.9,phase:"recover",left:[-.22,0],right:[.09,0]},
+  {at:1,phase:"establish",left:[.3,0],right:[-.12,.01]}
+ ],
+ flowPressureRelease:[
+  {at:0,phase:"establish",left:[.76,.04],right:[-.44,-.02]},
+  {at:.42,phase:"pressure",left:[.62,.02],right:[-.34,.03]},
+  {at:.72,phase:"recover",left:[.38,0],right:[-.2,0]},
+  {at:.9,phase:"recover",left:[.3,0],right:[-.16,-.01]},
+  {at:1,phase:"establish",left:[.76,.04],right:[-.44,-.02]}
+ ],
+ flowEdgeControl:[
+  {at:0,phase:"establish",left:[.58,0],right:[.28,.02]},
+  {at:.24,phase:"pressure",left:[.86,.05],right:[.48,-.03]},
+  {at:.5,phase:"pressure",left:[.82,-.04],right:[.44,.03]},
+  {at:.76,phase:"recover",left:[.48,0],right:[.24,0]},
+  {at:1,phase:"establish",left:[.58,0],right:[.28,.02]}
+ ],
+ flowStrafeRecovery:[
+  {at:0,phase:"establish",left:[.58,0],right:[.22,.01]},
+  {at:.28,phase:"pressure",left:[-.72,0],right:[.16,.02]},
+  {at:.48,phase:"pressure",left:[-.76,0],right:[-.08,-.02]},
+  {at:.72,phase:"recover",left:[-.48,0],right:[-.22,0]},
+  {at:.88,phase:"recover",left:[-.18,0],right:[-.12,.01]},
+  {at:1,phase:"establish",left:[.58,0],right:[.22,.01]}
+ ],
+ flowStableAimSwitch:[
+  {at:0,phase:"establish",left:[.34,0],right:[.13,.01]},
+  {at:.22,phase:"pressure",left:[.72,0],right:[.17,-.01]},
+  {at:.48,phase:"recover",left:[-.7,0],right:[.12,.01]},
+  {at:.72,phase:"pressure",left:[-.72,0],right:[.16,-.01]},
+  {at:.9,phase:"recover",left:[-.22,0],right:[.13,0]},
+  {at:1,phase:"establish",left:[.34,0],right:[.13,.01]}
+ ],
+ flowMovementHoldAimWork:[
+  {at:0,phase:"establish",left:[.68,0],right:[.08,0]},
+  {at:.25,phase:"pressure",left:[.7,.01],right:[.32,.08]},
+  {at:.5,phase:"pressure",left:[.68,-.01],right:[-.25,-.06]},
+  {at:.75,phase:"recover",left:[.66,0],right:[.14,.02]},
+  {at:1,phase:"establish",left:[.68,0],right:[.08,0]}
+ ],
+ flowRhythmBreak:[
+  {at:0,phase:"establish",left:[.28,0],right:[.12,0]},
+  {at:.16,phase:"establish",left:[.68,0],right:[.2,.01]},
+  {at:.32,phase:"establish",left:[-.68,0],right:[-.19,-.01]},
+  {at:.48,phase:"pressure",left:[.7,0],right:[.18,.01]},
+  {at:.7,phase:"pressure",left:[.7,0],right:[.14,-.01]},
+  {at:.84,phase:"recover",left:[-.62,0],right:[-.16,0]},
+  {at:1,phase:"establish",left:[.28,0],right:[.12,0]}
+ ]
+};
+
 const COMBAT_SCENARIOS=[
  {id:"mirror",label:"Mirror",weaponStyle:"",conceptName:"Mirror",description:"Aim broadly supports movement without copying it exactly.",mode:"gamescenario",profile:"mirror",mechanics:["mirror"]},
  {id:"antiMirror",label:"Anti-Mirror",weaponStyle:"",conceptName:"Anti-Mirror",description:"Aim broadly counters movement while keeping both roles separate.",mode:"gamescenario",profile:"antiMirror",mechanics:["antiMirror"]},
@@ -1024,6 +1144,18 @@ const COMBAT_SCENARIOS=[
  {id:"aimPriority",label:"Aim Priority",weaponStyle:"",conceptName:"Aim Priority",description:"Aim drives the mechanic while movement adapts.",mode:"gamescenario",profile:"aimPriority",mechanics:["aimPriority"]},
  {id:"independentTiming",label:"Independent Timing",weaponStyle:"",conceptName:"Independent Timing",description:"One thumb deliberately leads the other while both remain continuous.",mode:"gamescenario",profile:"independentTiming",mechanics:["independentTiming"]}
 ];
+const STRAFE_COMBAT_SCENARIOS=[
+ {id:"wideStrafe",label:"Wide Strafe",weaponStyle:"",conceptName:"Wide Strafe",description:"Use committed lateral movement while aim follows the broad crossing path.",mode:"gamescenario",profile:"wideStrafe",mechanics:["wideStrafe"]},
+ {id:"tightStrafe",label:"Tight Strafe",weaponStyle:"",conceptName:"Tight Strafe",description:"Make compact lateral adjustments for close cover or fine duel spacing.",mode:"gamescenario",profile:"tightStrafe",mechanics:["tightStrafe"]},
+ {id:"longHold",label:"Long Hold",weaponStyle:"",conceptName:"Long Hold",description:"Commit to one strafe direction long enough to punish premature switching.",mode:"gamescenario",profile:"longHold",mechanics:["longHold"]},
+ {id:"delayedSwitch",label:"Delayed Switch",weaponStyle:"",conceptName:"Delayed Switch",description:"Reverse movement first, then settle aim onto the new direction after a readable delay.",mode:"gamescenario",profile:"delayedSwitch",mechanics:["delayedSwitch"]},
+ {id:"strafeRecovery",label:"Strafe Recovery",weaponStyle:"",conceptName:"Strafe Recovery",description:"Recover the movement and aim path after a controlled strafe overshoot.",mode:"gamescenario",profile:"strafeRecovery",mechanics:["strafeRecovery"]},
+ {id:"pressureCarry",label:"Pressure Carry",weaponStyle:"",conceptName:"Pressure Carry",description:"Carry deliberate stick pressure through a sustained lateral crossing.",mode:"gamescenario",profile:"pressureCarry",mechanics:["pressureCarry"]},
+ {id:"reversePressure",label:"Reverse Pressure",weaponStyle:"",conceptName:"Reverse Pressure",description:"Reverse a committed strafe while preserving controlled opposing aim pressure.",mode:"gamescenario",profile:"reversePressure",mechanics:["reversePressure"]},
+ {id:"burstStrafe",label:"Burst Strafe",weaponStyle:"",conceptName:"Burst Strafe",description:"Alternate short movement bursts with brief controlled reductions in pressure.",mode:"gamescenario",profile:"burstStrafe",mechanics:["burstStrafe"]},
+ {id:"strafeCounterPressure",label:"Counter Pressure",weaponStyle:"",conceptName:"Counter Pressure",description:"Strafe decisively while aim applies measured pressure against the movement direction.",mode:"gamescenario",profile:"strafeCounterPressure",mechanics:["strafeCounterPressure"]},
+ {id:"strafeMovementPriority",label:"Movement Priority",weaponStyle:"",conceptName:"Movement Priority",description:"Let positioning lead the exchange while aim adapts to each movement decision.",mode:"gamescenario",profile:"strafeMovementPriority",mechanics:["strafeMovementPriority"]}
+];
 const COMBAT_MECHANICS={
  pressureHold:{id:"pressureHold",name:"Pressure Hold",coachingCue:"Keep both steady",family:"hold",behavior:"continuous",weight:3,motion:{relation:"same",leftSpeed:.32,rightSpeed:.24,response:2,turn:.16,changeMin:3800,changeMax:5000,offset:.04},left:{job:"stable movement",band:[.66,.8],diagonalChance:.06},right:{job:"stable aim pressure",band:[.38,.5],horizontal:{mode:"sameOrFree",followChance:.82,min:.08,max:.15},vertical:{profile:"neutralTight",jitterChance:0}}},
  microCorrections:{id:"microCorrections",name:"Micro Corrections",coachingCue:"Small aim pressure",family:"precision",behavior:"continuous",weight:3,motion:{relation:"same",leftSpeed:.55,rightSpeed:.19,response:2.35,turn:.16,changeMin:2100,changeMax:3100,offset:-.04},left:{job:"readable movement",band:[.42,.58],diagonalChance:.05},right:{job:"tiny aim changes",band:[.12,.23],horizontal:{mode:"free",min:-.06,max:.06},vertical:{profile:"neutralTight",jitterChance:0}}},
@@ -1052,9 +1184,19 @@ const COMBAT_MECHANICS={
  angleHold:{id:"angleHold",name:"Angle Hold",coachingCue:"Hold the angle",family:"angle",behavior:"continuous",weight:2,motion:{relation:"same",path:"angleHold",cycleMs:5000,pathResponse:5.3,pathEntryMs:850,leftSpeed:.6,rightSpeed:.51,response:3.2,turn:.12,changeMin:3200,changeMax:4300},left:{job:"fixed movement angle",band:[.38,.78],diagonalChance:.28},right:{job:"natural aim response",band:[.22,.45],horizontal:{mode:"same",followChance:.88,min:.09,max:.18},vertical:{profile:"balanced",jitterChance:0}}},
  movementPriority:{id:"movementPriority",name:"Movement Priority",coachingCue:"Move first",family:"priority",behavior:"continuous",weight:2,motion:{relation:"same",priority:"left",cycleMs:4700,pathResponse:5.3,pathEntryMs:950,leftSpeed:.9,rightSpeed:.42,response:2.4,turn:.6,changeMin:1650,changeMax:2350,offset:.08},left:{job:"driving movement",band:[.56,.78],diagonalChance:.14},right:{job:"adapting aim",band:[.22,.4],horizontal:{mode:"same",followChance:.86,min:.09,max:.17},vertical:{profile:"balanced",jitterChance:0}}},
  aimPriority:{id:"aimPriority",name:"Aim Priority",coachingCue:"Aim first",family:"priority",behavior:"continuous",weight:2,motion:{relation:"same",priority:"right",cycleMs:4700,pathResponse:5.3,pathEntryMs:950,leftSpeed:.42,rightSpeed:.9,response:2.4,turn:.6,changeMin:1650,changeMax:2350,offset:-.08},left:{job:"adapting movement",band:[.45,.65],diagonalChance:.1},right:{job:"driving aim",band:[.3,.52],horizontal:{mode:"free",min:-.2,max:.2},vertical:{profile:"balanced",jitterChance:0}}},
- independentTiming:{id:"independentTiming",name:"Independent Timing",coachingCue:"One then the other",family:"timing",behavior:"continuous",weight:2,motion:{relation:"independent",path:"timing",cycleMs:6100,leadFraction:.21,pathResponse:5.3,pathEntryMs:1100,leftSpeed:.68,rightSpeed:.68,response:3,turn:.38,changeMin:2400,changeMax:3300,alternateRoles:true},left:{job:"leading movement timing",band:[.5,.74],diagonalChance:.12},right:{job:"following aim timing",band:[.25,.47],horizontal:{mode:"free",min:-.17,max:.17},vertical:{profile:"balanced",jitterChance:0}}}
+ independentTiming:{id:"independentTiming",name:"Independent Timing",coachingCue:"One then the other",family:"timing",behavior:"continuous",weight:2,motion:{relation:"independent",path:"timing",cycleMs:6100,leadFraction:.21,pathResponse:5.3,pathEntryMs:1100,leftSpeed:.68,rightSpeed:.68,response:3,turn:.38,changeMin:2400,changeMax:3300,alternateRoles:true},left:{job:"leading movement timing",band:[.5,.74],diagonalChance:.12},right:{job:"following aim timing",band:[.25,.47],horizontal:{mode:"free",min:-.17,max:.17},vertical:{profile:"balanced",jitterChance:0}}},
+ wideStrafe:{id:"wideStrafe",name:"Wide Strafe",coachingCue:"Commit to the lane",family:"Strafe",behavior:"continuous",weight:2,motion:{relation:"same",path:"relationship",cycleMs:6200,phaseOffset:-.1,arcSpan:1.35,pathResponse:4.8,pathEntryMs:850,leftSpeed:.88,rightSpeed:.62,response:3.4,turn:.22,changeMin:2600,changeMax:3600},left:{job:"wide lateral strafe",band:[.68,.86],diagonalChance:.03},right:{job:"tracking across the lane",band:[.28,.5],horizontal:{mode:"same",followChance:.9,min:.12,max:.22},vertical:{profile:"neutralTight",jitterChance:0}}},
+ tightStrafe:{id:"tightStrafe",name:"Tight Strafe",coachingCue:"Keep switches compact",family:"Strafe",behavior:"continuous",weight:2,motion:{relation:"same",path:"relationship",cycleMs:3300,phaseOffset:-.08,arcSpan:.38,pathResponse:6.2,pathEntryMs:650,leftSpeed:.72,rightSpeed:.58,response:4.4,turn:.12,changeMin:1100,changeMax:1650},left:{job:"compact lateral strafe",band:[.32,.5],diagonalChance:.02},right:{job:"fine aim tracking",band:[.16,.32],horizontal:{mode:"same",followChance:.92,min:.07,max:.14},vertical:{profile:"neutralTight",jitterChance:0}}},
+ longHold:{id:"longHold",name:"Long Hold",coachingCue:"Hold the direction",family:"Strafe",behavior:"continuous",weight:2,motion:{relation:"same",leftSpeed:.68,rightSpeed:.5,response:3.2,turn:.06,changeMin:4200,changeMax:5600,reverse:true,offset:.03},left:{job:"sustained lateral hold",band:[.62,.8],diagonalChance:.02},right:{job:"steady aim carry",band:[.25,.42],horizontal:{mode:"same",followChance:.9,min:.1,max:.18},vertical:{profile:"neutralTight",jitterChance:0}}},
+ delayedSwitch:{id:"delayedSwitch",name:"Delayed Switch",coachingCue:"Move, then settle aim",family:"Strafe",behavior:"continuous",weight:2,motion:{relation:"independent",path:"timing",cycleMs:4800,leadFraction:.24,pathResponse:5.8,pathEntryMs:800,leftSpeed:.82,rightSpeed:.6,response:3.4,turn:.18,changeMin:1900,changeMax:2600},left:{job:"leading strafe switch",band:[.56,.78],diagonalChance:.03},right:{job:"delayed aim switch",band:[.24,.44],horizontal:{mode:"free",min:-.16,max:.16},vertical:{profile:"neutralTight",jitterChance:0}}},
+ strafeRecovery:{id:"strafeRecovery",name:"Strafe Recovery",coachingCue:"Recover without snapping",family:"Strafe",behavior:"continuous",weight:2,motion:{relation:"same",path:"recover",cycleMs:3900,overshoot:.38,recoverAt:.44,pathResponse:5.6,pathEntryMs:750,leftSpeed:.84,rightSpeed:.62,response:3.6,turn:.28,changeMin:1800,changeMax:2500},left:{job:"recovering strafe path",band:[.48,.8],diagonalChance:.05},right:{job:"recovering aim path",band:[.22,.46],horizontal:{mode:"same",followChance:.88,min:.1,max:.19},vertical:{profile:"balanced",jitterChance:0}}},
+ pressureCarry:{id:"pressureCarry",name:"Pressure Carry",coachingCue:"Carry pressure through",family:"Strafe",behavior:"continuous",weight:2,motion:{relation:"same",path:"relationship",cycleMs:5700,phaseOffset:-.14,arcSpan:.92,pathResponse:4.6,pathEntryMs:900,leftSpeed:.74,rightSpeed:.48,response:3,turn:.16,changeMin:2800,changeMax:3900},left:{job:"carried movement pressure",band:[.7,.84],diagonalChance:.03},right:{job:"stable tracking pressure",band:[.4,.56],horizontal:{mode:"same",followChance:.9,min:.13,max:.22},vertical:{profile:"neutralTight",jitterChance:0}}},
+ reversePressure:{id:"reversePressure",name:"Reverse Pressure",coachingCue:"Reverse, keep control",family:"Strafe",behavior:"continuous",weight:2,motion:{relation:"counter",leftSpeed:.86,rightSpeed:.64,response:4.9,turn:.12,changeMin:1500,changeMax:2200,reverse:true},left:{job:"reversing committed strafe",band:[.62,.82],diagonalChance:.04},right:{job:"preserved opposing pressure",band:[.3,.5],horizontal:{mode:"opposite",followChance:.92,min:.14,max:.25},vertical:{profile:"neutralTight",jitterChance:0}}},
+ burstStrafe:{id:"burstStrafe",name:"Burst Strafe",coachingCue:"Burst, pause, burst",family:"Strafe",behavior:"continuous",weight:2,motion:{relation:"same",path:"pressure",pressurePattern:"ladder",cycleMs:3000,pathResponse:7,pathEntryMs:600,leftSpeed:.92,rightSpeed:.6,response:4.2,turn:.1,changeMin:1200,changeMax:1700},left:{job:"short strafe bursts",band:[.18,.82],diagonalChance:.02},right:{job:"aim through each burst",band:[.18,.44],horizontal:{mode:"same",followChance:.88,min:.08,max:.18},vertical:{profile:"neutralTight",jitterChance:0}}},
+ strafeCounterPressure:{id:"strafeCounterPressure",name:"Counter Pressure",coachingCue:"Counter the strafe",family:"Strafe",behavior:"continuous",weight:2,motion:{relation:"counter",leftSpeed:.84,rightSpeed:.66,response:5.1,turn:.26,changeMin:1800,changeMax:2500},left:{job:"decisive lateral movement",band:[.64,.82],diagonalChance:.06},right:{job:"measured counter pressure",band:[.3,.5],horizontal:{mode:"opposite",followChance:.94,min:.15,max:.27},vertical:{profile:"neutralTight",jitterChance:0}}},
+ strafeMovementPriority:{id:"strafeMovementPriority",name:"Movement Priority",coachingCue:"Position first",family:"Strafe",behavior:"continuous",weight:2,motion:{relation:"same",priority:"left",cycleMs:4400,pathResponse:5.7,pathEntryMs:800,leftSpeed:.94,rightSpeed:.4,response:2.6,turn:.52,changeMin:1500,changeMax:2200,offset:.07},left:{job:"positioning-led strafe",band:[.58,.82],diagonalChance:.1},right:{job:"aim adapting to movement",band:[.2,.4],horizontal:{mode:"same",followChance:.88,min:.08,max:.16},vertical:{profile:"balanced",jitterChance:0}}}
 };
-const COMBAT_SCENARIO_BY_ID=Object.fromEntries(COMBAT_SCENARIOS.map(entry=>[entry.id,entry]));
+const COMBAT_SCENARIO_BY_ID=Object.fromEntries([...COMBAT_SCENARIOS,...STRAFE_COMBAT_SCENARIOS,...COMBAT_FLOW_SCENARIOS].map(entry=>[entry.id,entry]));
 const COMBAT_SCENARIO_ALIASES={smg:"pressureHold",shotgun:"stableMovement",micro:"microCorrections",reset:"stableAim",mixed:"mixed"};
 
 function resolveCombatScenarioId(value){
@@ -1103,8 +1245,131 @@ function isContinuousCombatMechanic(){
  return activeCombatMechanic().behavior==="continuous";
 }
 
+function isCombatDrill(){
+ return S.challengeMode&&S.challengeType==="combat"&&S.mode==="gamescenario";
+}
+
+function isCombatFlowDrill(){
+ return S.challengeMode&&S.challengeType==="combatflow"&&S.mode==="gamescenario";
+}
+
+function isCombatCompositionDrill(){
+ return isCombatDrill();
+}
+
+function activeCombatMovementPattern(){
+ return COMBAT_MOVEMENT_PATTERN_BY_ID[S.currentMovementPatternId]||COMBAT_MOVEMENT_PATTERNS[0];
+}
+
+function selectCombatMovementPattern(mechanicId){
+ const previous=S.combatDrillHistory[S.combatDrillHistory.length-1];
+ let candidates=COMBAT_MOVEMENT_PATTERNS.filter(pattern=>
+  pattern.id!==previous?.patternId&&`${pattern.id}:${mechanicId}`!==previous?.combination
+ );
+ if(!candidates.length)candidates=[...COMBAT_MOVEMENT_PATTERNS];
+ const pattern=candidates[Math.floor(Math.random()*candidates.length)];
+ S.currentMovementPatternId=pattern.id;
+ S.combatMovementPatternDirection=Math.random()<.5?-1:1;
+ S.combatDrillHistory.push({patternId:pattern.id,mechanicId,combination:`${pattern.id}:${mechanicId}`});
+ if(S.combatDrillHistory.length>12)S.combatDrillHistory.shift();
+ return pattern;
+}
+
+function activeCombatMovementPatternConfig(pattern=activeCombatMovementPattern()){
+ const profile=combatDifficultyProfile();
+ return{
+  ...pattern,
+  cycleMs:pattern.cycleMs/((profile.motionSpeed+profile.directionChangeRate)/2),
+  speed:pattern.speed*profile.motionSpeed
+ };
+}
+
+function activeCombatMovementPatternBand(pattern=activeCombatMovementPattern()){
+ if(!isCombatFlowDrill())return pattern.band;
+ const profile=combatDifficultyProfile();
+ const center=(pattern.band[0]+pattern.band[1])/2;
+ const span=(pattern.band[1]-pattern.band[0])*(1+(profile.pathRange-1)*.65);
+ const edgeShift=(profile.outerPressureChance-.35)*.1;
+ return[
+  Math.max(.05,center-span/2+edgeShift),
+  Math.min(.9,center+span/2+edgeShift)
+ ];
+}
+
+function combatMovementPatternTarget(pattern,now,band){
+ const elapsed=Math.max(0,now-S.scenarioMotionStartedAt);
+ const cycleMs=Math.max(1200,pattern.cycleMs);
+ const phase=(elapsed%cycleMs)/cycleMs;
+ const halfPhase=(phase%.5)*2;
+ const side=(phase<.5?1:-1)*S.combatMovementPatternDirection;
+ const pressureAt=value=>band.min+(band.max-band.min)*clampNumber(value,0,1);
+ let pressure=.72;
+ let direction=side;
+
+ if(pattern.kind==="switch"){
+  const transition=Math.max(.04,pattern.transition||.16);
+  const edgeDistance=Math.min(halfPhase,1-halfPhase);
+  pressure=clampNumber(edgeDistance/transition,0,1);
+ }else if(pattern.kind==="delayed"){
+  pressure=halfPhase<.62?1:1-smoothCombatStep((halfPhase-.62)/.38);
+ }else if(pattern.kind==="burst"){
+  const burstPhase=(phase*4)%1;
+  direction=(Math.floor(phase*4)%2?1:-1)*S.combatMovementPatternDirection;
+  pressure=burstPhase<.58?smoothCombatStep(burstPhase/.18):1-smoothCombatStep((burstPhase-.58)/.42);
+ }else if(pattern.kind==="rhythm"){
+  const steps=[{end:.18,side:1,pressure:.92},{end:.31,side:-1,pressure:.52},{end:.59,side:1,pressure:.76},{end:.72,side:1,pressure:.38},{end:1,side:-1,pressure:1}];
+  const step=steps.find(item=>phase<item.end)||steps[steps.length-1];
+  direction=step.side*S.combatMovementPatternDirection;
+  pressure=step.pressure;
+ }else if(pattern.kind==="recovery"){
+  const recovery=Math.sin(halfPhase*Math.PI);
+  pressure=.58+recovery*.42;
+  if(halfPhase>.68)pressure-=smoothCombatStep((halfPhase-.68)/.32)*.28;
+ }else if(pattern.kind==="carry"){
+  pressure=.84+Math.sin(phase*Math.PI*4)*.08;
+ }
+
+ return{x:direction*pressureAt(pressure),y:0};
+}
+
+function activeCombatFlowScenario(){
+ return COMBAT_FLOW_SCENARIO_BY_ID[S.scenarioName]||null;
+}
+
+function authoredCombatFlowBand(side){
+ const profile=combatDifficultyProfile();
+ const edgeBonus=(profile.outerPressureChance-.35)*(side==="left"?.1:.06);
+ const range=(side==="left"?.82:.52)*profile.pathRange+edgeBonus;
+ return[.04,clampNumber(range,.36,.9)];
+}
+
+function authoredCombatFlowTargets(scenario,now){
+ const track=COMBAT_FLOW_PHASE_TRACKS[scenario.id];
+ const profile=combatDifficultyProfile();
+ const timingScale=(profile.motionSpeed+profile.directionChangeRate)/2;
+ const cycleMs=Math.max(3600,scenario.cycleMs/timingScale);
+ const phase=(Math.max(0,now-S.scenarioMotionStartedAt)%cycleMs)/cycleMs;
+ const nextIndex=track.findIndex(point=>point.at>=phase);
+ const next=track[nextIndex<0?track.length-1:nextIndex];
+ const previous=track[Math.max(0,(nextIndex<0?track.length-1:nextIndex)-1)];
+ const progress=smoothCombatStep((phase-previous.at)/Math.max(.001,next.at-previous.at));
+ const interpolate=(side,index)=>previous[side][index]+(next[side][index]-previous[side][index])*progress;
+ const rangeScale=profile.pathRange/.94;
+ const independenceScale=.82+profile.independenceAmount*.22;
+ const edgeScale=1+(profile.outerPressureChance-.35)*.08;
+ const target=side=>{
+  const sideScale=side==="left"?rangeScale*edgeScale:rangeScale*independenceScale;
+  const x=interpolate(side,0)*sideScale;
+  const y=interpolate(side,1)*sideScale;
+  const distance=Math.hypot(x,y);
+  if(distance<=.88)return{x,y};
+  return{x:x/distance*.88,y:y/distance*.88};
+ };
+ return{left:target("left"),right:target("right"),phase:previous.phase};
+}
+
 function beginMechanicTrace(now){
- if(!DEBUG||!S.challengeMode||S.challengeType!=="mechanic")return;
+ if(!DEBUG||!S.challengeMode||!["mechanic","strafe"].includes(S.challengeType))return;
  const motionInitialized=Math.hypot(S.scenarioLeft.vx,S.scenarioLeft.vy)>0&&Math.hypot(S.scenarioRight.vx,S.scenarioRight.vy)>0;
  S.mechanicTrace={
   mechanic:S.currentCombatMechanicId,
@@ -1113,7 +1378,7 @@ function beginMechanicTrace(now){
   motionInitialized,
   stayedInsideBounds:true
  };
- console.debug("[Mechanic Challenge] mechanic entered",{...S.mechanicTrace});
+ console.debug(`[${challengeTypeMeta().label}] mechanic entered`,{...S.mechanicTrace});
 }
 
 function updateMechanicTraceBounds(left,right){
@@ -1125,7 +1390,7 @@ function updateMechanicTraceBounds(left,right){
 
 function endMechanicTrace(reason){
  if(!DEBUG||!S.mechanicTrace)return;
- console.debug("[Mechanic Challenge] mechanic exited",{
+ console.debug(`[${challengeTypeMeta().label}] mechanic exited`,{
   ...S.mechanicTrace,
   elapsedMs:Math.max(0,performance.now()-S.mechanicTrace.enteredAt),
   reason
@@ -1364,7 +1629,9 @@ function getCombatScenarioDescriptor(){
  }
  if(S.mode==="gamescenario"){
   const entry=getCombatScenarioEntry(S.scenarioName||S.challengeScenarioPreset||($("gameScenarioType")?.value));
-  const mechanic=entry?getCombatMechanicById(entry.mechanics?.[0]):COMBAT_MECHANICS.follow;
+  const mechanic=getCombatMechanicById(S.currentCombatMechanicId||entry?.mechanics?.[0]);
+  if(isCombatFlowDrill())return{weaponStyle:"",conceptName:entry.label,coachingCue:entry.cue};
+  if(isCombatCompositionDrill())return{weaponStyle:"",movementPatternName:activeCombatMovementPattern().label,conceptName:mechanic.name,coachingCue:mechanic.coachingCue};
   return entry?{weaponStyle:"",conceptName:entry.label,coachingCue:mechanic.coachingCue}:{weaponStyle:"",conceptName:"Follow",coachingCue:COMBAT_MECHANICS.follow.coachingCue};
  }
  return{weaponStyle:"",conceptName:""};
@@ -1507,7 +1774,7 @@ function challengeEntryMeta(entry){
  if(combatEntry){
   const mechanicId=combatEntry.mechanics?.[0]||combatEntry.id;
   const mechanic=getCombatMechanicById(mechanicId);
-  return{mode:combatEntry.mode,label:combatEntry.label,scenario:combatEntry.id,challengeCategory:"combat",weaponStyle:"",conceptName:combatEntry.label,mechanicId,family:mechanic.family};
+  return{mode:combatEntry.mode,label:combatEntry.label,scenario:combatEntry.id,challengeCategory:"combat",weaponStyle:"",conceptName:combatEntry.label,mechanicId,family:combatEntry.family||mechanic.family};
  }
  const labels={sequence:"Sequence",simultaneous:"Simultaneous Buttons",sticks:"Single Stick",dualsticks:"Simultaneous Sticks",strafeaim:"Strafe + Aim",dualtrack:"Dual Tracking",reactivetrack:"Reactive Tracking",gamescenario:"Combat"};
  return{mode:entry,label:labels[entry]||entry,scenario:null,challengeCategory:challengeEntryCategory(entry)};
@@ -1559,7 +1826,7 @@ function buildChallengeQueue(){
     candidates=differentCategoryCandidates;
    }
   }
-  if((typeKey==="combat"||typeKey==="mechanic")&&lastCombatMeta&&candidates.length>1){
+  if((typeKey==="combat"||typeKey==="combatflow"||typeKey==="mechanic"||typeKey==="strafe")&&lastCombatMeta&&candidates.length>1){
     const differentCombatCandidates=candidates.filter(mode=>{
      const meta=challengeEntryMeta(mode);
        return meta.mechanicId!==lastCombatMeta.mechanicId&&meta.family!==lastCombatMeta.family;
@@ -1608,6 +1875,8 @@ function clearActiveDrillState(options={}){
  S.scenarioRight={x:0,y:0,vx:0,vy:0,targetVx:0,targetVy:0,speed:0,targetX:0,targetY:0,nextChange:0,nextJump:0};
  S.combatRoleSwap=false;
  S.currentCombatMechanicId=null;
+ S.currentMovementPatternId=null;
+ S.combatMovementPatternDirection=1;
  S.scenarioMotionStartedAt=0;
  S.scenarioName="";
  S.weaponStyle="";
@@ -1627,9 +1896,11 @@ function clearActiveDrillState(options={}){
   if(prompt)prompt.innerHTML="";
   if(strip)strip.innerHTML="";
   $("stickModeBanner")?.classList.add("hidden");
+  $("combatMechanicLabel")?.classList.add("hidden");
   $("combatCueLabel")?.classList.add("hidden");
   $("combatPromptBadge")?.classList.add("hidden");
   if($("stickModeBanner"))$("stickModeBanner").textContent="";
+  if($("combatMechanicLabel"))$("combatMechanicLabel").textContent="";
   if($("combatCueLabel"))$("combatCueLabel").textContent="";
   if($("combatPromptBadge"))$("combatPromptBadge").textContent="";
  }
@@ -1701,7 +1972,7 @@ function challengeTargetForCurrentMode(){
 
 function challengeDurationForCurrentMode(){
  const mode=S.mode;
- if(mode==="gamescenario"&&S.challengeMode&&S.challengeType==="mechanic")return 8000+Math.floor(Math.random()*7001);
+ if(mode==="gamescenario"&&S.challengeMode&&["mechanic","strafe"].includes(S.challengeType))return 8000+Math.floor(Math.random()*7001);
  if(mode==="strafeaim"||mode==="dualtrack"||mode==="reactivetrack"||mode==="gamescenario")return 6000+Math.floor(Math.random()*6000);
  return null;
 }
@@ -1782,7 +2053,7 @@ function updateChallengeSummary(){
  const bestName=best?challengeEntryMeta(best.mode).label:"—";
  const needsPracticeName=needsPractice?challengeEntryMeta(needsPractice.mode).label:"—";
  const challengeLine=`${typeMeta.label}. Modes completed: ${S.challengeCompletedModes.length || entries.length}. Best mode: ${bestName}. Needs practice: ${needsPracticeName}.`;
- const combatLine=(S.challengeType==="combat"||S.challengeType==="mechanic")&&S.combatConceptsPracticed.length
+ const combatLine=(S.challengeType==="combat"||S.challengeType==="combatflow"||S.challengeType==="mechanic"||S.challengeType==="strafe")&&S.combatConceptsPracticed.length
   ?`Combat mechanics: ${S.combatConceptsPracticed.join(", ")}.`
   :"";
  summary.textContent=combatLine?`${challengeLine}\n${combatLine}`:challengeLine;
@@ -1813,7 +2084,8 @@ function newRound(){
  if(!S.running||S.paused)return;
  S.trackingWasOnTarget=false;
  const preserveSimultaneousReleaseGate=S.mode==="simultaneous"&&S.simultaneousButtonWaitingForRelease;
- clearActiveDrillState({resetController:true,resetPromptUi:true,preserveSimultaneousReleaseGate});
+ const preserveChallengeScenarioPreset=S.challengeMode&&["strafe","combatflow"].includes(S.challengeType);
+ clearActiveDrillState({resetController:true,resetPromptUi:true,preserveSimultaneousReleaseGate,resetChallengePreset:!preserveChallengeScenarioPreset});
  let len=+$("sequenceLength").value;
  if(S.challengeMode){
   S.challengeSwitchPending=false;
@@ -1878,11 +2150,13 @@ function newRound(){
  }
  else if(S.mode==="gamescenario"){
   const now=performance.now();
-  const selected=resolveCombatScenarioId($("gameScenarioType").value);
+  const selected=resolveCombatScenarioId(preserveChallengeScenarioPreset?S.challengeScenarioPreset:$("gameScenarioType").value);
   const scenario=selected==="mixed"?COMBAT_SCENARIOS[Math.floor(Math.random()*COMBAT_SCENARIOS.length)].id:selected;
   const entry=getCombatScenarioEntry(scenario);
   S.currentCombatMechanicId=null;
   const mechanic=getCombatMechanic(entry);
+  const movementPattern=isCombatDrill()?selectCombatMovementPattern(mechanic.id):null;
+  const flowScenario=isCombatFlowDrill()?entry:null;
   const activationCount=S.combatActivationCounts[mechanic.id]||0;
   S.combatRoleSwap=!!(mechanic.motion.alternateRoles&&activationCount%2===1);
   S.combatActivationCounts[mechanic.id]=activationCount+1;
@@ -1903,7 +2177,28 @@ function newRound(){
   const amount=+$("leftMovementAmount").value;
   S.scenarioLeft={x:0,y:0,vx:0,vy:0,targetVx:0,targetVy:0,speed:0,targetX:0,targetY:0,nextChange:now+650};
   S.scenarioRight={x:0,y:0,vx:0,vy:0,targetVx:0,targetVy:0,speed:0,targetX:0,targetY:0,nextChange:now+420,nextJump:now+1400};
-  const movementDirection=applyCombatTargets(entry,amount,{immediate:true});
+  let movementDirection;
+  if(flowScenario){
+   const flowTargets=authoredCombatFlowTargets(flowScenario,now);
+   S.scenarioLeft.x=S.scenarioLeft.targetX=flowTargets.left.x;
+   S.scenarioLeft.y=S.scenarioLeft.targetY=flowTargets.left.y;
+   S.scenarioRight.x=S.scenarioRight.targetX=flowTargets.right.x;
+   S.scenarioRight.y=S.scenarioRight.targetY=flowTargets.right.y;
+   movementDirection=Math.sign(flowTargets.left.x)||1;
+  }else if(movementPattern){
+   const movementConfig=activeCombatMovementPatternConfig(movementPattern);
+    const movementPatternBand=activeCombatMovementPatternBand(movementPattern);
+    const movementBand=combatUsableBand(movementPatternBand[0],movementPatternBand[1]);
+   const movementTarget=combatMovementPatternTarget(movementConfig,now,movementBand);
+   const aimTarget=sampleCombatAimTask(mechanic,Math.sign(movementTarget.x)||1);
+   S.scenarioLeft.x=S.scenarioLeft.targetX=movementTarget.x;
+   S.scenarioLeft.y=S.scenarioLeft.targetY=movementTarget.y;
+   S.scenarioRight.x=S.scenarioRight.targetX=aimTarget.rightX;
+   S.scenarioRight.y=S.scenarioRight.targetY=aimTarget.rightY;
+   movementDirection=Math.sign(movementTarget.x)||1;
+  }else{
+   movementDirection=applyCombatTargets(entry,amount,{immediate:true});
+  }
   S.stickTargets[0].angle=(Math.atan2(S.scenarioLeft.y,S.scenarioLeft.x)*180/Math.PI+360)%360;
   S.stickTargets[0].distance=Math.hypot(S.scenarioLeft.x,S.scenarioLeft.y);
   S.stickTargets[1].angle=(Math.atan2(S.scenarioRight.y,S.scenarioRight.x)*180/Math.PI+360)%360;
@@ -1911,7 +2206,7 @@ function newRound(){
   {
   const motion=activeCombatMotion(mechanic);
    const baseMovementSpeed=.11+1.78*.09;
-   const movementSpeed=baseMovementSpeed*motion.leftSpeed;
+    const movementSpeed=baseMovementSpeed*(movementPattern?activeCombatMovementPatternConfig(movementPattern).speed:motion.leftSpeed);
    const aimSpeed=baseMovementSpeed*motion.rightSpeed;
    const movementAngle=(movementDirection<0?Math.PI:0)+(Math.random()-.5)*.45;
   S.scenarioLeft.targetVx=Math.cos(movementAngle)*movementSpeed;
@@ -2297,16 +2592,20 @@ function renderStickPrompt(){
  const contextLabel=S.mode==="dualtrack"?"DUAL TRACKING":
   S.mode==="reactivetrack"?"REACTIVE TRACKING":
   S.mode==="strafeaim"?"STRAFE + AIM":
-  S.challengeMode&&S.challengeType==="mechanic"?combatDescriptor.conceptName:
+  isCombatFlowDrill()?combatDescriptor.conceptName:
+  isCombatCompositionDrill()?combatDescriptor.movementPatternName:
+  S.challengeMode&&["mechanic","strafe"].includes(S.challengeType)?combatDescriptor.conceptName:
   `COMBAT · ${combatDescriptor.conceptName}`;
  S.weaponStyle=combatDescriptor.weaponStyle;
  S.conceptName=combatDescriptor.conceptName;
  $("stickModeBanner").classList.toggle("hidden",!combatMode);
+ $("combatMechanicLabel").classList.toggle("hidden",!isCombatCompositionDrill());
  $("combatCueLabel").classList.toggle("hidden",!combatScenario);
  $("combatPromptBadge").classList.toggle("hidden",!combatMode);
  $("combatPromptBadge").textContent=combatMode?badgeLabel:"";
  $("stickModeBanner").textContent=combatMode?contextLabel:"";
- $("combatCueLabel").textContent=combatScenario&&combatMechanic?combatMechanic.coachingCue.toUpperCase():"";
+ $("combatMechanicLabel").textContent=isCombatCompositionDrill()?combatDescriptor.conceptName:"";
+ $("combatCueLabel").textContent=combatScenario?(combatDescriptor.coachingCue||combatMechanic?.coachingCue||"").toUpperCase():"";
  $("stickModeBanner").classList.toggle("hud-context-label",combatMode);
  $("stickModeBanner").classList.toggle("reactive",S.mode==="reactivetrack");
  $("stickModeBanner").classList.toggle("scenario",S.mode==="gamescenario");
@@ -2494,12 +2793,15 @@ function updateGameScenarioTargets(now){
  const right=S.scenarioRight;
  const mechanic=activeCombatMechanic();
  const motion=activeCombatMotion(mechanic);
+ const flowScenario=isCombatFlowDrill()?activeCombatFlowScenario():null;
+ const movementPattern=isCombatCompositionDrill()?activeCombatMovementPatternConfig():null;
  const dt=Math.min(.05,Math.max(0,(now-S.continuousModeLastFrame)/1000));
- const leftBandConfig=combatBandForSide(mechanic,"left");
- const rightBandConfig=combatBandForSide(mechanic,"right");
+ const leftBandConfig=flowScenario?authoredCombatFlowBand("left"):movementPattern?activeCombatMovementPatternBand(movementPattern):combatBandForSide(mechanic,"left");
+ const rightBandConfig=flowScenario?authoredCombatFlowBand("right"):combatBandForSide(mechanic,"right");
  const leftBand=combatUsableBand(leftBandConfig[0],leftBandConfig[1]);
  const rightBand=combatUsableBand(rightBandConfig[0],rightBandConfig[1]);
- const pathTargets=combatParameterizedTargets(mechanic,motion,now,leftBand,rightBand);
+ const pathTargets=flowScenario?authoredCombatFlowTargets(flowScenario,now):combatParameterizedTargets(mechanic,motion,now,leftBand,rightBand);
+ if(movementPattern)pathTargets.left=combatMovementPatternTarget(movementPattern,now,leftBand);
 
  const velocityBlend=Math.min(1,dt*2.4);
  if(pathTargets.left){
@@ -2816,7 +3118,7 @@ function startSession(){
  S.sessionStart=performance.now();S.currentCombo=0;S.peakApm=0;S.inputTimes=[];S.transitionTimes=[];
  S.hesitations=0;S.recoveryTimes=[];S.lastMissAt=null;S.successWindow=[];S.lastInputAt=null;
  S.analysisRenderKey="";S.challengeRenderKey="";
- S.currentCombatMechanicId=null;S.combatMechanicHistory=[];S.combatActivationCounts={};S.combatRoleSwap=false;
+ S.currentCombatMechanicId=null;S.combatMechanicHistory=[];S.currentMovementPatternId=null;S.combatDrillHistory=[];S.combatActivationCounts={};S.combatRoleSwap=false;
  S.sessionTrackingOnTargetMs=0;S.sessionTrackingElapsedMs=0;
  resetSessionScore();
  S.infiniteSession=isInfiniteEligibleMode()&&$("infiniteStickSession").checked;

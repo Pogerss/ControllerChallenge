@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Roller Challenge</title>
-  <link rel="stylesheet" href="./style.css?v=11.6" />
+  <link rel="stylesheet" href="./style.css?v=12.0" />
 </head>
 <body>
 <div class="app">
@@ -12,7 +12,7 @@
     <div class="brand">
       <div class="brand-mark">RC</div>
       <div>
-        <h1>Roller Challenge <span>v11.6</span></h1>
+        <h1>Roller Challenge <span>v12.0</span></h1>
         <p>APM · Accuracy · Coordination</p>
       </div>
     </div>
@@ -25,21 +25,27 @@
   <div class="workspace">
     <aside class="sidebar panel">
       <div class="mode-group challenge-options">
-        <div class="section-title">Challenge</div>
+        <div class="section-title">Drills</div>
         <button class="nav active" data-mode="challenge" data-challenge-type="full">
-          <span>Full Challenge</span><small>Mixed training</small>
+          <span>Full Drill</span><small>Mixed training</small>
         </button>
         <button class="nav" data-mode="challenge" data-challenge-type="combat">
-          <span>Combat Challenge</span><small>Weapon styles and combat concepts</small>
+          <span>Combat Drill</span><small>Movement patterns + Combat mechanics</small>
+        </button>
+        <button class="nav" data-mode="challenge" data-challenge-type="combatflow">
+          <span>Combat Flow Drill</span><small>Integrated FPS movement and aim</small>
         </button>
         <button class="nav" data-mode="challenge" data-challenge-type="mechanic">
-          <span>Mechanic Challenge</span><small>Cycle every Combat mechanic</small>
+          <span>Mechanic Drill</span><small>Cycle every Combat mechanic</small>
+        </button>
+        <button class="nav" data-mode="challenge" data-challenge-type="strafe">
+          <span>Strafe Drill</span><small>Transferable FPS strafe mechanics</small>
         </button>
         <button class="nav" data-mode="challenge" data-challenge-type="stick">
-          <span>Stick Challenge</span><small>Stick targets and moving drills</small>
+          <span>Stick Drill</span><small>Stick targets and moving drills</small>
         </button>
         <button class="nav" data-mode="challenge" data-challenge-type="button">
-          <span>Button Challenge</span><small>Button chains and simultaneous inputs</small>
+          <span>Button Drill</span><small>Button chains and simultaneous inputs</small>
         </button>
       </div>
 
@@ -230,6 +236,7 @@
 
           <div id="stickTargets" class="stick-targets shared-stick-workspace hidden">
             <div id="stickModeBanner" class="stick-mode-banner hidden">Combat · — · —</div>
+            <div id="combatMechanicLabel" class="combat-mechanic-label hidden">PRESSURE HOLD</div>
             <div id="combatCueLabel" class="combat-cue-label hidden">KEEP BOTH STEADY</div>
 
             <div id="dualFocusLabel" class="dual-focus-label hidden">
@@ -319,7 +326,7 @@
         </article>
 
         <article class="panel card-pad compatibility-ui">
-          <div class="card-title">Challenge Progress</div>
+          <div class="card-title">Drill Progress</div>
           <div id="challengeList" class="challenge-list"></div>
         </article>
       </section>
@@ -347,7 +354,7 @@
       <section class="settings-section settings-section--primary">
         <div class="settings-section-heading">
           <div class="section-title">Session</div>
-          <p class="settings-section-copy">Core session pacing and challenge intensity.</p>
+          <p class="settings-section-copy">Core session pacing and drill intensity.</p>
         </div>
         <div class="settings-group primary-settings">
           <label class="field">Difficulty
@@ -375,8 +382,8 @@
         </div>
         <div class="settings-section-body">
           <div id="challengeCurrentSummary" class="challenge-current-summary mode-setting" data-modes="challenge">
-            <div class="section-title">Challenge Summary</div>
-            <strong id="challengeCurrentTitle">Full Challenge</strong>
+            <div class="section-title">Drill Summary</div>
+            <strong id="challengeCurrentTitle">Full Drill</strong>
             <small id="challengeCurrentLine1">Mixed buttons, sticks, tracking, and combat concepts.</small>
             <small id="challengeCurrentLine2">Auto-rotates through the full pool.</small>
           </div>
@@ -700,6 +707,6 @@
   </div>
 </div>
 
-<script src="./script.js?v=11.6"></script>
+<script src="./script.js?v=12.0"></script>
 </body>
 </html>

@@ -1,3 +1,47 @@
+Roller Challenge v12.0 - Authored Combat Flow Scenarios
+
+Combat Flow Drill:
+- Replaces arbitrary movement-pattern and mechanic pairing with ten authored,
+    repeatable FPS situations selected directly from the Drill queue.
+- Each situation moves continuously through establish, pressure, and recovery
+    phases using smooth keyframe interpolation with seamless cycle boundaries.
+- Shared Combat difficulty scales phase timing, movement speed, path range,
+    edge usage, correction speed, tracking tolerance, and thumb independence.
+- Reuses the existing Combat motion updater, scoring, HUD, arrows, Drill
+    lifecycle, transitions, and results without contact-to-complete behavior.
+- Avoids immediate scenario repeats and consecutive scenario families.
+
+Roller Challenge v11.9 - Combat Flow Drill
+
+Combat Flow Drill:
+- Combines one shared Strafe Pattern with one existing Combat mechanic.
+- Keeps left-stick movement, timing, and rhythm separate from right-stick aim,
+    thumb relationship, pressure lesson, and coaching cue.
+- Avoids immediate pattern, mechanic, and exact-combination repeats.
+- Difficulty scales pattern and mechanic speed, pressure range, path size, edge
+    usage, thumb independence, and tolerance without adding randomness.
+- Reuses the Combat updater, scoring, HUD, Drill transitions, and results.
+
+Roller Challenge v11.8 - Strafe Challenge
+
+Combat Drill:
+- Combines one left-stick movement pattern with one existing Combat mechanic.
+- Adds Wide Strafe, Tight Strafe, Long Hold, Delayed Switch, Burst Strafe,
+    Rhythm Break, Strafe Recovery, Pressure Carry, and Reverse Pressure patterns.
+- Keeps movement timing and pressure independent from the mechanic's right-stick
+    behavior, thumb relationship, aim lesson, and coaching cue.
+- Avoids immediate movement-pattern, mechanic, and exact-combination repeats.
+- Reuses the Combat updater, continuous scoring, HUD, transitions, and results.
+
+Strafe Challenge:
+- Adds Wide Strafe, Tight Strafe, Long Hold, Delayed Switch, Strafe Recovery,
+  Pressure Carry, Reverse Pressure, Burst Strafe, Counter Pressure, and
+  Movement Priority.
+- Selects only continuous Combat mechanics tagged with the Strafe family.
+- Reuses Combat movement, time-based scoring, transitions, HUD, coaching cues,
+  results, and snapping without changing existing Challenge or Practice pools.
+- Prevents immediate mechanic repeats, including across shuffled queue boundaries.
+
 Roller Challenge v11.6 - Results Repair and Shared Combat Difficulty
 
 Results repair:
